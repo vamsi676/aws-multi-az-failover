@@ -41,3 +41,13 @@ variable "github_repo" {
   description = "GitHub repository name (without the owner)."
   type        = string
 }
+
+variable "github_owner_id" {
+  description = "Numeric GitHub owner ID (gh api users/<owner> -q .id), used in immutable OIDC subjects."
+  type        = string
+}
+
+variable "github_repo_id" {
+  description = "Numeric GitHub repository ID (gh api repos/<owner>/<repo> -q .id), used in immutable OIDC subjects."
+  type        = string
+}

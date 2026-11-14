@@ -7,9 +7,15 @@ data "aws_partition" "current" {}
 
 locals {
   github_oidc_host = "token.actions.githubusercontent.com"
-  github_repo_sub  = "repo:${var.github_owner}/${var.github_repo}"
-  iam_arn_prefix   = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}"
-  aws_policy_arn   = "arn:${data.aws_partition.current.partition}:iam::aws:policy"
+  # GitHub can send the subject in two formats. Newer repos use "immutable" subjects that
+  # embed the numeric owner/repo IDs, so a deleted or renamed repo re-created by someone else
+  # does not match. Accept both forms for this exact repo.
+  github_repo_subs = [
+    "repo:${var.github_owner}/${var.github_repo}",
+    "repo:${var.github_owner}@${var.github_owner_id}/${var.github_repo}@${var.github_repo_id}",
+  ]
+  iam_arn_prefix = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}"
+  aws_policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy"
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -40,7 +46,7 @@ data "aws_iam_policy_document" "gha_plan_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["${local.github_repo_sub}:pull_request"]
+      values   = [for s in local.github_repo_subs : "${s}:pull_request"]
     }
   }
 }
@@ -107,7 +113,7 @@ data "aws_iam_policy_document" "gha_deploy_trust" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_host}:sub"
-      values   = ["${local.github_repo_sub}:environment:dev"]
+      values   = [for s in local.github_repo_subs : "${s}:environment:dev"]
     }
   }
 }
