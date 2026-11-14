@@ -1,0 +1,9 @@
+[project]
+name = "mazf-lambdas"
+version = "0.1.0"
+description = "Failover Lambdas: precheck, scale_asg, check_targets (boto3 only)"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["tests"]
+testpaths = ["tests"]

@@ -29,3 +29,12 @@ skip-check:
   # --- False positives ---
   - CKV2_AWS_5    # SGs are attached via module inputs (launch template / NLB); checkov cannot follow it
   - CKV_AWS_260   # Port-80 ingress references the NLB security group, not 0.0.0.0/0
+  # --- Lambdas / logs (Phase 5) ---
+  - CKV_AWS_338   # CLAUDE.md: all log groups keep 7 days (cost), not 1 year
+  - CKV_AWS_158   # Log group KMS encryption: CloudWatch Logs already encrypts at rest; a CMK adds cost
+  - CKV_AWS_116   # Lambda DLQ: invoked synchronously by Step Functions; Retry/Catch handle errors
+  - CKV_AWS_115   # Reserved concurrency: tiny, synchronous, low-volume functions (and it eats the account pool)
+  - CKV_AWS_117   # Lambda in VPC: they only call AWS APIs; a VPC would need NAT/endpoints (cost)
+  - CKV_AWS_272   # Lambda code signing: overkill for a learning project
+  - CKV_AWS_50    # Lambda X-Ray: not needed; logs + Step Functions history are enough
+  - CKV_AWS_284   # Step Functions X-Ray: same reason
