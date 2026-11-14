@@ -132,7 +132,7 @@ jobs:
       - name: AWS credentials (plan role, read-only)
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
           role-session-name: gha-plan-${{ github.run_id }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
@@ -148,7 +148,8 @@ jobs:
         working-directory: envs/dev
         env:
           TF_VAR_owner: ${{ vars.TF_VAR_OWNER }}
-          TF_VAR_allowed_cidr: ${{ vars.ALLOWED_CIDR }}
+          TF_VAR_allowed_cidr: ${{ secrets.ALLOWED_CIDR }}
+          TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
           TF_VAR_artifacts_bucket_name: ${{ vars.ARTIFACTS_BUCKET }}
         run: |
           terraform plan -no-color -lock-timeout=120s -out=tfplan
