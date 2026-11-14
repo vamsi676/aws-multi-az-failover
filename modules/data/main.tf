@@ -2,6 +2,7 @@
 resource "aws_dynamodb_table" "tasks" {
   name         = "${var.name_prefix}-tasks"
   billing_mode = "PAY_PER_REQUEST"
+  read_capacity_units = 5
   hash_key     = "id"
 
   attribute {
