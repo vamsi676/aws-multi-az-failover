@@ -1,0 +1,60 @@
+name: destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type "destroy-dev" to destroy envs/dev (bootstrap is never touched)
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TERRAFORM_VERSION: "1.11.4"
+
+jobs:
+  destroy:
+    name: destroy envs/dev
+    if: inputs.confirm == 'destroy-dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: envs/dev   # only ever envs/dev
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: AWS credentials (deploy role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-destroy-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform plan -destroy
+        env:
+          TF_VAR_owner: ${{ vars.TF_VAR_OWNER }}
+          TF_VAR_allowed_cidr: ${{ vars.ALLOWED_CIDR }}
+          TF_VAR_artifacts_bucket_name: ${{ vars.ARTIFACTS_BUCKET }}
+        run: |
+          terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          terraform plan -destroy -no-color -lock-timeout=120s -out=destroy.tfplan
+          terraform show -no-color destroy.tfplan | grep -E '^(Plan:|No changes)' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: terraform apply (destroy)
+        run: terraform apply -no-color -lock-timeout=120s destroy.tfplan

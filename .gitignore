@@ -58,3 +58,4 @@ dist/
 logs/
 # OS
 .DS_Store
+.terraform-plugin-cache/
