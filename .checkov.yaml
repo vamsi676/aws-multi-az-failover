@@ -25,6 +25,7 @@ skip-check:
   - CKV2_AWS_20   # NLB is TCP pass-through on port 80 for a demo app (no TLS certificate/domain)
   - CKV_AWS_111   # CodeDeploy role: ec2:RunInstances/CreateTags on * is required by AWS with launch templates
   - CKV_AWS_356   # Same CodeDeploy statement; plus iam:Get*/List* read-only on * for the deploy role
+  - CKV_AWS_109   # KMS key policy grants kms:* to the account root: the standard AWS pattern that enables IAM policies
   # --- False positives ---
   - CKV2_AWS_5    # SGs are attached via module inputs (launch template / NLB); checkov cannot follow it
   - CKV_AWS_260   # Port-80 ingress references the NLB security group, not 0.0.0.0/0

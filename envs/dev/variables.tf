@@ -24,6 +24,14 @@ variable "owner" {
 variable "allowed_cidr" {
   description = "Your public IP as a /32; the only source allowed to reach the NLB."
   type        = string
+  # Hidden in plan output: CI logs and PR comments of a public repo are public.
+  sensitive = true
+}
+
+variable "alert_email" {
+  description = "Email subscribed to the alerts SNS topic (confirm the subscription email)."
+  type        = string
+  sensitive   = true
 }
 
 variable "artifacts_bucket_name" {

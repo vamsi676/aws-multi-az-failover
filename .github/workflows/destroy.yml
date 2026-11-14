@@ -36,7 +36,7 @@ jobs:
       - name: AWS credentials (deploy role)
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: gha-destroy-${{ github.run_id }}
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
@@ -49,7 +49,8 @@ jobs:
       - name: terraform plan -destroy
         env:
           TF_VAR_owner: ${{ vars.TF_VAR_OWNER }}
-          TF_VAR_allowed_cidr: ${{ vars.ALLOWED_CIDR }}
+          TF_VAR_allowed_cidr: ${{ secrets.ALLOWED_CIDR }}
+          TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
           TF_VAR_artifacts_bucket_name: ${{ vars.ARTIFACTS_BUCKET }}
         run: |
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"

@@ -32,6 +32,7 @@ variable "public_subnet_cidrs" {
 variable "allowed_cidr" {
   description = "CIDR allowed to reach the NLB on port 80 (your IP, e.g. 203.0.113.10/32)."
   type        = string
+  sensitive   = true
 
   validation {
     condition     = can(cidrhost(var.allowed_cidr, 0))

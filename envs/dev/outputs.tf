@@ -62,3 +62,13 @@ output "codedeploy_deployment_group_name" {
   description = "CodeDeploy deployment group."
   value       = module.deploy.deployment_group_name
 }
+
+output "sns_topic_arn" {
+  description = "Alerts SNS topic."
+  value       = module.monitoring.sns_topic_arn
+}
+
+output "alarm_name" {
+  description = "HealthyHostCount alarm."
+  value       = module.monitoring.alarm_name
+}

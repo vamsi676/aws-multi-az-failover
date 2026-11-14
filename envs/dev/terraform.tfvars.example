@@ -6,3 +6,4 @@ owner                 = "your-name"
 allowed_cidr          = "203.0.113.10/32"       # curl -s https://checkip.amazonaws.com  -> <ip>/32
 artifacts_bucket_name = "mazf-artifacts-xxxxxxxx" # bootstrap output: artifacts_bucket_name
 instance_type         = "t3.micro"
+alert_email           = "you@example.com"    # confirm the SNS subscription email
