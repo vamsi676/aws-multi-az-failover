@@ -212,3 +212,33 @@ tell it to write "unknown"; it then does.
 ---
 
 ## Phase 8 (optional): scheduler
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| design | Scaling to 0 would fire our own alarm and the failover would scale the standby back up | A small state machine does the steps **in order**; 2 EventBridge Scheduler schedules only start it with `{"action":"stop"\|"start"}` |
+| `validate-state-machine-definition`, `terraform plan` / `apply` | Scheduler state machine, 2 schedules, group, roles | `9 to add, 0 to change, 0 to destroy`. checkov: `CKV_AWS_297` (schedule CMK) skipped, input has no secrets |
+| `terraform apply -var 'schedule_stop_expression=at(17:33)' -var 'schedule_start_expression=at(17:39)'` | Prove the schedules really fire | `0 add, 2 change`. 17:33 stop: rule DISABLED, actions off, ASGs 0/0; 17:39 start: ASG-a 1 |
+| watch rule / alarm / targets | **Found a bug** | The start path re-armed after **1 minute** because the alarm still showed a **stale OK** (metrics ~5 min late). No failover happened only because the NLB publishes **no** datapoints while the target group is empty |
+| `get-metric-statistics HealthyHostCount` | Why no ALARM during the 7-min stop? | Datapoints missing 17:34-17:39 (empty target group = no metric); CloudWatch evaluated older `1.0` points, so OK. Contrast Phase 4: registered-but-unhealthy target = `0` datapoints = ALARM |
+| fix `scheduler.asl.json`: poll `elasticloadbalancingv2:describeTargetHealth` every minute; re-arm only when healthy **7 minutes in a row AND** alarm OK (cap 30 min) | Never trust a fresh OK | ASL `OK`; `terraform apply` (schedules kept on the test values) `0 add, 3 change`; committed `cf0c43d` |
+| `aws stepfunctions start-execution --input '{"action":"stop"}'` (17:52) | **Manual stop test** (your request) | `DisableFailoverRule -> MuteAlarm -> ScaleDownPrimary -> ScaleDownStandby`; rule DISABLED, actions **False**, ASGs 0/0; watched 12 min: failover executions **7 -> 7** |
+| `start-execution --input '{"action":"start"}'` (18:04) | **Manual start test** | Alarm went **ALARM at 18:05:40** (rule disabled: no failover). Target healthy 18:06:24. Polls: streak 0..5 with ALARM, streak 6 with OK (**still waited**), streak 7 + OK -> rule ENABLED, actions True at 18:12:37. Failover executions **still 7** |
+| `terraform plan` / `apply` with defaults | Revert schedules (your request) | Plan touched **only the 2 schedules** (expression + timezone UTC -> America/New_York), `0 add, 2 change, 0 destroy`; now `cron(0 22 * * ? *)` / `cron(0 7 * * ? *)` ENABLED; drift check exit 0 |
+
+**Phase 8 result: PASS** (schedules visible and fire correctly; stop never triggers a failover;
+start re-arms only after the app is really healthy).
+
+**Lesson:** an alarm state is only as fresh as its metric. Before re-arming automation, check the
+source of truth (target health) for longer than metric delay + alarm periods.
+
+---
+
+## Remaining test plan items
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| `aws autoscaling suspend-processes --auto-scaling-group-name mazf-asg-a --scaling-processes Launch HealthCheck ReplaceUnhealthy`; `aws ec2 stop-instances` (18:13) | **Test #9** instance failure (stop, not terminate) | Target `unhealthy` in ~45 s (registered target -> `0` datapoints); alarm **ALARM 18:21**; failover execution #8 SUCCEEDED; app on `us-east-1b` |
+| `aws autoscaling resume-processes`, `scripts/start_failback.sh` | Undo test #9 | Suspended list empty; stopped instance `Terminating`; failback SUCCEEDED; back on `us-east-1a`, 5 tasks |
+| `terraform plan -destroy -out=destroy.tfplan` (envs/dev) | **Test #10** (read-only part) | `0 to add, 0 to change, 74 to destroy`, all from envs/dev modules; **nothing** from bootstrap (state/artifacts buckets, gha roles, OIDC provider, budget). Saved plan removed; **destroy not run** (needs your OK) |
+
+**Test #9: PASS. Test #10: plan verified; destroy waits for approval.**
