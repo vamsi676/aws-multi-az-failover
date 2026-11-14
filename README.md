@@ -5,6 +5,13 @@ Balancer. When the active AZ has no healthy target, Step Functions fails over to
 automatically. Built with Terraform as a hands-on learning project. See [CLAUDE.md](CLAUDE.md)
 for the full design and phase plan.
 
+## Project summary
+
+Built and deployed a multi-AZ Python app on AWS (Terraform, 74 resources) with event-driven
+failover via CloudWatch, EventBridge, Step Functions and Lambda (measured RTO 8m35s, zero-downtime
+failback), CodeDeploy releases with auto-rollback, GitHub Actions CI/CD over OIDC, and Amazon
+Bedrock for AI incident reports and CI failure analysis.
+
 ## Layout
 
 | Path | What |

@@ -3,6 +3,27 @@
 All commands run from the repo root with `export AWS_PROFILE=<profile> AWS_REGION=us-east-1 AWS_PAGER=""`.
 Names and ARNs come from `terraform -chdir=envs/dev output`.
 
+## Start again next time
+
+`bootstrap/` (state + artifacts buckets, budget, OIDC roles) stays; only `envs/dev` is rebuilt.
+
+1. `aws sts get-caller-identity` (right account/profile).
+2. Your IP changes often: `curl -s https://checkip.amazonaws.com` -> update `allowed_cidr` in
+   `envs/dev/terraform.tfvars` **and** `gh secret set ALLOWED_CIDR` (CI plans use the secret).
+3. `cd envs/dev && terraform init -backend-config=backend.hcl && terraform plan -out=tfplan`
+   -> expect **74 to add, 0 to destroy** -> `terraform apply tfplan` (~5 min; the NLB is slowest).
+4. **Confirm the new SNS subscription email** (every rebuild creates a new subscription).
+5. Wait ~3 min for cloud-init, then deploy the app (a new deployment group has no revision yet):
+   `PYTHON=.venv/bin/python scripts/build_app.sh && scripts/deploy_app.sh dist/taskboard-<sha>.zip`
+   (or the `deploy` workflow with `app`, approve environment `dev`).
+6. `scripts/status.sh` -> ASG-a 1 InService, target healthy, alarm OK; open the app URL.
+   The DynamoDB table is new, so the board starts empty.
+7. CI's `ai-analyze` role (`mazf-ci-ai-analyze`) only exists while envs/dev is up; its ARN does
+   not change, so the `AWS_AI_ROLE_ARN` secret stays valid.
+8. While the stack is up the night schedule runs (22:00 stop / 07:00 start, America/New_York).
+9. End of session: `terraform plan -destroy -out=destroy.tfplan` (check nothing from bootstrap)
+   -> `terraform apply destroy.tfplan`. The KMS key goes to `PendingDeletion` for 7 days (no charge).
+
 ## Daily use
 
 | Task | Command |
