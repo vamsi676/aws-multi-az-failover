@@ -51,6 +51,9 @@ jobs:
           TF_VAR_owner: ${{ vars.TF_VAR_OWNER }}
           TF_VAR_allowed_cidr: ${{ secrets.ALLOWED_CIDR }}
           TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+          TF_VAR_github_repo_id: ${{ github.repository_id }}
           TF_VAR_artifacts_bucket_name: ${{ vars.ARTIFACTS_BUCKET }}
         run: |
           terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"

@@ -17,6 +17,10 @@ env:
   TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
   TERRAFORM_VERSION: "1.11.4"
 
+# Every step writes its output to logs/<step>.log (tee). GitHub's default bash runs with
+# -eo pipefail, so a failing command still fails the step. On failure the job records its
+# last-written log in logs/FAILED_STEP; all logs are uploaded for the ai-analyze job.
+
 jobs:
   terraform-static:
     name: terraform fmt / validate / tflint / checkov
@@ -29,8 +33,8 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Create Terraform plugin cache dir
-        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - name: Create log and plugin cache dirs
+        run: mkdir -p logs "$TF_PLUGIN_CACHE_DIR"
 
       - name: Cache Terraform providers
         uses: actions/cache@v6
@@ -39,17 +43,16 @@ jobs:
           key: tf-providers-${{ hashFiles('**/.terraform.lock.hcl') }}
 
       - name: terraform fmt
-        run: terraform fmt -check -recursive -diff
+        run: terraform fmt -check -recursive -diff 2>&1 | tee logs/terraform-fmt.log
 
       - name: terraform validate
         run: |
-          mkdir -p "$TF_PLUGIN_CACHE_DIR"
           for dir in bootstrap envs/dev; do
             echo "::group::$dir"
-            terraform -chdir="$dir" init -backend=false
-            terraform -chdir="$dir" validate
+            terraform -chdir="$dir" init -backend=false -no-color
+            terraform -chdir="$dir" validate -no-color
             echo "::endgroup::"
-          done
+          done 2>&1 | tee logs/terraform-validate.log
 
       - uses: terraform-linters/setup-tflint@v6
         with:
@@ -57,8 +60,10 @@ jobs:
 
       - name: tflint
         run: |
-          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
-          tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
+          {
+            tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+            tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
+          } 2>&1 | tee logs/tflint.log
 
       - uses: actions/setup-python@v7
         with:
@@ -67,7 +72,21 @@ jobs:
       - name: checkov
         run: |
           pip install --quiet checkov==3.4.5
-          checkov -d . --config-file .checkov.yaml
+          checkov -d . --config-file .checkov.yaml 2>&1 | tee logs/checkov.log
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+          if [[ "${{ job.status }}" == "failure" ]]; then ls -t logs/*.log 2>/dev/null | head -1 > logs/FAILED_STEP || true; fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-logs-${{ github.job }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   python:
     name: ruff + pytest
@@ -82,20 +101,35 @@ jobs:
           cache-dependency-path: app/requirements*.txt
 
       - name: Install dev dependencies
-        run: pip install -r app/requirements-dev.txt
+        run: |
+          mkdir -p logs
+          pip install -r app/requirements-dev.txt 2>&1 | tee logs/pip-install.log
 
       - name: ruff
         run: |
-          ruff check .
-          ruff format --check .
+          { ruff check . && ruff format --check .; } 2>&1 | tee logs/ruff.log
 
       - name: pytest (app)
         working-directory: app
-        run: pytest -q
+        run: pytest -q 2>&1 | tee ../logs/pytest-app.log
 
       - name: pytest (lambdas)
         working-directory: lambda
-        run: pytest -q
+        run: pytest -q 2>&1 | tee ../logs/pytest-lambdas.log
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+          if [[ "${{ job.status }}" == "failure" ]]; then ls -t logs/*.log 2>/dev/null | head -1 > logs/FAILED_STEP || true; fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-logs-${{ github.job }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   build:
     name: build app bundle
@@ -111,8 +145,22 @@ jobs:
 
       - name: Build bundle (not uploaded)
         run: |
-          scripts/build_app.sh "${GITHUB_SHA::7}"
-          ls -lh dist/
+          mkdir -p logs
+          { scripts/build_app.sh "${GITHUB_SHA::7}" && ls -lh dist/; } 2>&1 | tee logs/build.log
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+          if [[ "${{ job.status }}" == "failure" ]]; then ls -t logs/*.log 2>/dev/null | head -1 > logs/FAILED_STEP || true; fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-logs-${{ github.job }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7
 
   plan:
     name: terraform plan (envs/dev)
@@ -130,8 +178,8 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Create Terraform plugin cache dir
-        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - name: Create log and plugin cache dirs
+        run: mkdir -p logs "$TF_PLUGIN_CACHE_DIR"
 
       - name: Cache Terraform providers
         uses: actions/cache@v6
@@ -150,8 +198,8 @@ jobs:
       - name: terraform init
         working-directory: envs/dev
         run: |
-          mkdir -p "$TF_PLUGIN_CACHE_DIR"
-          terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          terraform init -no-color -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" 2>&1 \
+            | tee ../../logs/terraform-init.log
 
       - name: terraform plan
         id: plan
@@ -161,8 +209,11 @@ jobs:
           TF_VAR_allowed_cidr: ${{ secrets.ALLOWED_CIDR }}
           TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
           TF_VAR_artifacts_bucket_name: ${{ vars.ARTIFACTS_BUCKET }}
+          TF_VAR_github_repository: ${{ github.repository }}
+          TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
+          TF_VAR_github_repo_id: ${{ github.repository_id }}
         run: |
-          terraform plan -no-color -lock-timeout=120s -out=tfplan
+          terraform plan -no-color -lock-timeout=120s -out=tfplan 2>&1 | tee ../../logs/terraform-plan.log
           terraform show -no-color tfplan > plan.txt
 
       - name: Comment plan on the PR
@@ -191,3 +242,50 @@ jobs:
             echo "_Commit ${GITHUB_SHA::7}, run ${GITHUB_RUN_ID}_"
           } > comment.md
           gh pr comment "$PR" --body-file comment.md --edit-last --create-if-none
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p logs
+          if [[ "${{ job.status }}" == "failure" ]]; then ls -t logs/*.log 2>/dev/null | head -1 > logs/FAILED_STEP || true; fi
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ci-logs-${{ github.job }}
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ai-analyze:
+    name: AI failure analysis (Bedrock)
+    needs: [terraform-static, python, build, plan]
+    if: failure()
+    continue-on-error: true   # never changes the pipeline result
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write       # OIDC token for the Bedrock-only role
+      pull-requests: write  # AI comment
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ci-logs-*
+          path: ci-logs
+
+      - name: AWS credentials (Bedrock InvokeModel only)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_AI_ROLE_ARN }}
+          role-session-name: gha-ai-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: Analyze failed logs
+        env:
+          BEDROCK_MODEL_ID: ${{ vars.BEDROCK_MODEL_ID }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/ci_ai_analyze.sh ci-logs
