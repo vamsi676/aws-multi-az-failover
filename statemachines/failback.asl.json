@@ -62,7 +62,7 @@
     "ShouldProceed": {
       "Type": "Choice",
       "Choices": [
-        {"Condition": "{% $states.input.proceed = true %}", "Next": "ScaleUpStandby"}
+        {"Condition": "{% $states.input.proceed = true %}", "Next": "ScaleUpPrimary"}
       ],
       "Default": "NotifySkipped"
     },
@@ -80,7 +80,7 @@
     "Skipped": {
       "Type": "Succeed"
     },
-    "ScaleUpStandby": {
+    "ScaleUpPrimary": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",
       "Arguments": {
@@ -100,7 +100,7 @@
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
-          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleUpStandby"},
+          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleUpPrimary"},
           "Next": "NotifyFailure"
         }
       ],
@@ -139,13 +139,13 @@
           "Next": "NotifyFailure"
         }
       ],
-      "Next": "StandbyHealthy"
+      "Next": "PrimaryHealthy"
     },
-    "StandbyHealthy": {
+    "PrimaryHealthy": {
       "Type": "Choice",
       "Comment": "Loop every 30s, at most ${max_checks} checks (about 15 minutes).",
       "Choices": [
-        {"Condition": "{% $states.input.healthy = true %}", "Next": "ScaleDownActive"},
+        {"Condition": "{% $states.input.healthy = true %}", "Next": "ScaleDownStandby"},
         {"Condition": "{% $checks >= ${max_checks} %}", "Next": "TargetsTimedOut"}
       ],
       "Default": "WaitForTargets"
@@ -154,11 +154,11 @@
       "Type": "Pass",
       "Assign": {
         "error": "{% {'Error': 'PrimaryNotHealthy', 'Cause': 'No healthy target in primary ' & $cfg.target_asg & ' after ' & $string($checks) & ' checks. Last check: ' & $string($last_check)} %}",
-        "failed_state": "StandbyHealthy"
+        "failed_state": "PrimaryHealthy"
       },
       "Next": "NotifyFailure"
     },
-    "ScaleDownActive": {
+    "ScaleDownStandby": {
       "Type": "Task",
       "Comment": "Only after the primary is healthy: never leave the app with zero instances.",
       "Resource": "arn:aws:states:::lambda:invoke",
@@ -179,7 +179,7 @@
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
-          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleDownActive"},
+          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleDownStandby"},
           "Next": "NotifyFailure"
         }
       ],
