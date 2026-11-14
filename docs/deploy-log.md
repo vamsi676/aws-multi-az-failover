@@ -80,3 +80,22 @@ Conventions: `$P` = `--profile <aws-profile>`; commands run from the repo root u
 ---
 
 ## Phase 3: CI/CD
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| `uvx checkov -d . --framework terraform` | See findings before CI does | 22 failures, all cost decisions (no KMS CMK, no flow/access logs), design decisions (public IP, TCP 80) or false positives (SG referenced via module input). Each skipped **with a reason** in `.checkov.yaml` -> `194 passed, 0 failed` |
+| `gh api -X PUT repos/<repo>/environments/dev` with `reviewers` | Environment `dev` with me as required reviewer | **Error 422:** "billing plan supports the required reviewers protection rule". Free plan: environment protection rules only on **public** repos (`wait_timer` also 422). Created `dev` without reviewer, limited to branch `main`, until decided |
+| `gh variable set ...` (9 vars) | CI needs role ARNs, state bucket, artifacts bucket, CodeDeploy names, `TF_VAR_*` | Values piped from `terraform output` (never typed or committed) |
+| `git push` + `gh pr create` (PR #1) | Run CI | fmt/validate/tflint/checkov ✅, ruff+pytest ✅, build ✅, **plan ❌** |
+| `gh run view --log-failed` | Why did plan fail? | `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity` |
+| `gh api repos/<repo>/actions/oidc/customization/sub` | Which `sub` does GitHub send? | `use_immutable_subject: true`, prefix `repo:<owner>@<owner_id>/<repo>@<repo_id>`: the trust policy expected `repo:<owner>/<repo>:pull_request`, so no match |
+| *(approved exception)* `bootstrap/`: add `github_owner_id`, `github_repo_id`; trust accepts both subject forms; `terraform plan` / `apply` | Fix the trust policy | `0 to add, 2 to change, 0 to destroy` (two roles, in place) |
+| scan `git log --all -p` for account ID, IP, profile, bucket names, keys, email | Before making the repo public | Only hit: the git **author email** in commit metadata (accepted) |
+| `gh repo edit --visibility public`, then PUT environment with reviewer | Required reviewers are free on public repos | `required_reviewers: [<me>]`, branch policy `main` |
+| `git push` (PR #1 re-runs) | — | All 4 checks ✅; PR comment "Terraform plan: envs/dev (success) **No changes**", 12-digit numbers masked |
+| `gh pr merge 1 --merge` | `workflow_dispatch` only works for workflows on the default branch; `dev` only allows `main` | Merged |
+| header text change -> PR #2 -> CI ✅ -> `gh pr merge 2` | Test plan #5 | — |
+| `gh workflow run deploy.yml --ref main -f target=app` | Deploy the change through CI | Run status `waiting` = **paused for the required reviewer** |
+
+**Lesson:** GitHub OIDC subjects can be "immutable" (`owner@id/repo@id`). Check
+`gh api repos/<owner>/<repo>/actions/oidc/customization/sub` before writing trust policies.
