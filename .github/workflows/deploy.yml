@@ -27,6 +27,12 @@ env:
   TERRAFORM_VERSION: "1.11.4"
   AWS_REGION: ${{ vars.AWS_REGION }}
 
+# "shell: bash" makes GitHub run steps with "bash --noprofile --norc -eo pipefail".
+# Without it the default is "bash -e" (NO pipefail), so "cmd | tee log" would hide a failing cmd.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   deploy:
     name: deploy ${{ inputs.target }} to dev
