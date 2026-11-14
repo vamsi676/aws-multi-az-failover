@@ -17,9 +17,15 @@ env:
   TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
   TERRAFORM_VERSION: "1.11.4"
 
-# Every step writes its output to logs/<step>.log (tee). GitHub's default bash runs with
-# -eo pipefail, so a failing command still fails the step. On failure the job records its
-# last-written log in logs/FAILED_STEP; all logs are uploaded for the ai-analyze job.
+# Every step writes its output to logs/<step>.log (tee); pipefail (see defaults below) keeps a
+# failing command failing the step. On failure the job records its last-written log in
+# logs/FAILED_STEP; all logs are uploaded for the ai-analyze job.
+
+# "shell: bash" makes GitHub run steps with "bash --noprofile --norc -eo pipefail".
+# Without it the default is "bash -e" (NO pipefail), so "cmd | tee log" would hide a failing cmd.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   terraform-static:

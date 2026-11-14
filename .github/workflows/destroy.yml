@@ -20,6 +20,12 @@ env:
   TF_INPUT: "false"
   TERRAFORM_VERSION: "1.11.4"
 
+# "shell: bash" makes GitHub run steps with "bash --noprofile --norc -eo pipefail".
+# Without it the default is "bash -e" (NO pipefail), so "cmd | tee log" would hide a failing cmd.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   destroy:
     name: destroy envs/dev
