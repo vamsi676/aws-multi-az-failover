@@ -58,7 +58,7 @@ if ! aws bedrock-runtime converse \
     --messages "file://$WORK/messages.json" \
     --inference-config maxTokens=600,temperature=0.2 \
     --output json > "$WORK/response.json" 2> "$WORK/error.txt"; then
-  echo "::warning::Bedrock call failed: $(head -c 300 "$WORK/error.txt")"
+  echo "::warning::Bedrock call failed: $(tr -s '\n' ' ' < "$WORK/error.txt" | head -c 300)"
   {
     echo "### AI failure analysis unavailable"
     echo "Bedrock call failed (model \`${MODEL_ID}\`). The CI result is unchanged; read the job logs."

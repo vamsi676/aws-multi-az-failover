@@ -181,3 +181,34 @@ old one is removed. An *unplanned* failover's downtime is mostly detection time.
 ---
 
 ## Phase 7: Bedrock
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| `aws bedrock list-inference-profiles` / `list-foundation-models` | Which small models can we call? | Nova Micro/Lite, Claude Haiku 4.5/5.5 profiles ACTIVE. Chose **`us.amazon.nova-lite-v1:0`** (cheap, no Anthropic first-use form) |
+| `aws bedrock-runtime converse --model-id us.amazon.nova-lite-v1:0` | Is model access enabled? | `"Bedrock ok"`, 10 tokens: no console action needed |
+| python script adds `WriteIncidentReport` / `AnalyzeFailure` to both ASLs; `validate-state-machine-definition` | Bedrock via the optimized `bedrock:invokeModel` integration (Nova `messages-v1` body) | First attempt crashed locally: Python `%` formatting clashed with JSONata `{% %}`; rebuilt the strings by concatenation. Both ASLs `OK` |
+| `terraform plan` / `apply` | SFN Bedrock IAM (one profile + its foundation model), new `mazf-ci-ai-analyze` role (envs/dev, so bootstrap stays untouched) | `2 to add, 4 to change, 0 to destroy` |
+| `start-execution` with a bad ASG name | Failure path with AI | `Precheck -> AnalyzeFailure -> NotifyFailure -> Failed`; analysis named the bad ASG and suggested `aws autoscaling describe-auto-scaling-groups` |
+| `scripts/simulate_outage.sh` (16:55:35Z) | Real failover with AI report (done-criteria) | ALARM 17:03:12 -> SUCCEEDED; `WriteIncidentReport` took **1.5 s**; email had SUMMARY / TIMELINE / DURATION / NEXT STEPS |
+| compare AI timeline with `get-execution-history` | **Test #8a** | All timestamps match. AI said 131.8 s vs email 133.4 s: the facts were computed in `WriteIncidentReport`, the email 1.6 s later in `NotifySuccess` (not a hallucination) |
+| `scripts/start_failback.sh` | Failback with AI report | SUCCEEDED; report wrote "Alarm-to-recovery time is **unknown**" (no alarm on a manual run): the "do not guess" rule works |
+| `terraform apply -var bedrock_model_id=us.amazon.nova-doesnotexist-v1:0`, then failure path + planned failover + failback | **Test #8c** (state machines) | All three behaved exactly as before; AI parts said `(AI ... unavailable: Bedrock.ValidationException. The facts above are complete.)` |
+| `terraform apply` (default model) + `plan -detailed-exitcode` | Restore | `exit 0` = no drift |
+| `gh secret set AWS_AI_ROLE_ARN`, `gh variable set BEDROCK_MODEL_ID` | Inputs for the `ai-analyze` job | — |
+| PR #6 (Phase 7) | CI with logs + ai-analyze | All green; `ai-analyze` **skipped** (nothing failed) |
+| draft PR #7 with `read_capacity_units = 5` on a PAY_PER_REQUEST table | **Test #8b** | AI comment posted. **But** `terraform validate` had passed: see next row |
+| analysis of PR #7 logs | Why did validate pass? | **Bug:** GitHub's default shell is `bash -e` **without pipefail**, so `terraform validate \| tee` hid the failure (and `deploy_app.sh \| tee` could hide a failed deploy). **Fix (PR #8):** `defaults.run.shell: bash` -> `-eo pipefail` |
+| re-run PR #7 after the fix | — | Now fails at `terraform fmt` (first real error); AI: "Run `terraform fmt`": correct |
+| `gh variable set BEDROCK_MODEL_ID` to a bad ID, `gh run rerun` | **Test #8c** (CI) | Every job result identical except `ai-analyze` success -> failure; run conclusion unchanged. Warning text was empty (CLI error starts with a newline) -> fixed with `tr -s '\n' ' '` |
+| restore `BEDROCK_MODEL_ID`, `gh pr close 7` | Cleanup | Test PR closed, not merged |
+
+**Phase 7 result: PASS** (AI report in failover email; AI comment on a failing PR; a wrong model ID never
+breaks failover or CI).
+
+**Lessons:** (1) always set `shell: bash` in GitHub Actions when piping to `tee`; (2) keep AI off the
+recovery path: own timeout + Catch + a complete plain-text fallback; (3) give the model a facts JSON and
+tell it to write "unknown"; it then does.
+
+---
+
+## Phase 8 (optional): scheduler
