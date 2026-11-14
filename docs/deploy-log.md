@@ -134,3 +134,32 @@ here), so expect a total RTO of roughly 7-10 minutes in Phase 5, not 2-3.
 ---
 
 ## Phase 5: failover
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| `pytest -q` in `lambda/` | Unit tests for precheck / scale_asg / check_targets (boto3 clients replaced by small fakes) | `10 passed` |
+| render ASL with dummy values, `aws stepfunctions validate-state-machine-definition` | Catch ASL/JSONata mistakes **before** apply (read-only API) | `result: OK`, no diagnostics |
+| `terraform init` (adds `hashicorp/archive` 2.8.1), `terraform providers lock -platform=darwin_arm64 -platform=linux_amd64` | `archive_file` zips each Lambda; lock hashes for Mac and CI | — |
+| checkov | New Lambda/log-group checks | 24 failures across 8 generic checks (DLQ, VPC, X-Ray, 1-year retention, ...). Each skipped with a concrete reason -> `322 passed, 0 failed` |
+| `terraform plan` | 3 Lambdas (+roles, logs), SFN role, state machine, EventBridge rule + role | `23 to add, 0 to change, 0 to destroy` |
+| `terraform apply tfplan` | — | `23 added` |
+| background monitor: `curl /api/meta` every 2 s -> `watch.log` | Measure real downtime like `/status` does | — |
+| `scripts/simulate_outage.sh` | **Test #1** (happy path) | service stopped 16:32:12Z |
+| poll alarm / executions / ASGs | Watch the chain | ALARM ~16:39:13 -> execution started **the same second** (EventBridge) -> ASG-b desired 1 -> SUCCEEDED 16:41:25; ASG-a desired 0 |
+| `aws stepfunctions get-execution-history` | Timeline | Precheck 3.8 s, ScaleUp 3 s, **4 checks × 30 s** until healthy, ScaleDown 0.5 s, Notify. Execution total ≈ 2m12s |
+| `curl /api/meta`, `/api/tasks` | Same data in the new AZ? | `us-east-1b`, new instance, version `126ae74`, **same 4 tasks** (DynamoDB is regional) |
+| `aws deploy list-deployments` / `get-deployment` | **Test #7** fresh-instance deploy | Deployment `creator: autoscaling`, `releases/126ae74.zip`, `Succeeded`: the CodeDeploy launch hook gave the new instance the last good revision; no launch/terminate loop |
+| `awk` over `watch.log` | Measured RTO | first failure 16:32:13 -> first 200 from 1b 16:40:48 = **8m35s** (≈7 min detection, ≈1.5 min failover) |
+| `aws stepfunctions start-execution --input '{}'` while on AZ-b | **Test #3** split-brain guard | `Init -> Precheck -> ShouldProceed -> NotifySkipped -> Skipped`; nothing scaled |
+| `start-execution --input '{"overrides":{"target_asg":"mazf-asg-does-not-exist"}}'` | **Test #4** failure path | `FAILED`, `ValueError: Auto Scaling group not found`; `Precheck -> NotifyFailure -> Failed`; ASGs unchanged |
+| `aws cloudwatch get-metric-statistics AWS/SNS NumberOfNotificationsDelivered` | Were the emails sent? | 4 delivered (ALARM, SUCCEEDED, SKIPPED, FAILED), 0 failed |
+
+**Phase 5 result: PASS** (automatic failover to us-east-1b with the same tasks, success email; tests #3, #4, #7 also PASS).
+
+**Lessons:** EventBridge starts the state machine within a second of the alarm; almost all of the
+RTO is detection (NLB metric delay). The standby needed ~2 min (boot + user_data + CodeDeploy hook)
+before the NLB marked it healthy.
+
+---
+
+## Phase 6: failback
