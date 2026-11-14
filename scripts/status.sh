@@ -3,6 +3,7 @@
 # state machine executions and the latest CodeDeploy deployment.
 #
 # Usage: AWS_PROFILE=<profile> scripts/status.sh
+# Note: with --max-items the CLI also prints a pagination token line ("None"), hence "| head -1".
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,7 +70,7 @@ if [[ -z "$machines" ]]; then
 else
   for arn in $machines; do
     latest="$(aws stepfunctions list-executions --state-machine-arn "$arn" --max-items 1 \
-      --query 'executions[0].[name,status,startDate]' --output text)"
+      --query 'executions[0].[name,status,startDate]' --output text | head -1)"
     [[ -z "$latest" || "$latest" == "None" ]] && latest="(no executions)"
     printf '%s  %s\n' "${arn##*:}" "$latest"
   done
@@ -78,7 +79,7 @@ fi
 section "Latest CodeDeploy deployment"
 dep_id="$(aws deploy list-deployments --application-name "$CD_APP" \
   --deployment-group-name "$CD_DG" --max-items 1 \
-  --query 'deployments[0]' --output text)"
+  --query 'deployments[0]' --output text | head -1)"
 if [[ -z "$dep_id" || "$dep_id" == "None" ]]; then
   echo "(no deployments yet - first one in Phase 2)"
 else
