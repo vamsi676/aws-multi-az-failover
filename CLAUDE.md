@@ -13,14 +13,25 @@ Step Functions, Lambda, SNS, KMS, SSM, S3, IAM (incl. GitHub OIDC), Bedrock.
 - I am a Cloud/DevOps engineer learning these services hands-on. Explain what you build and
   WHY, in simple Tenglish (Telugu-English). Keep all code, comments and docs in English.
 - We build **one phase at a time**. Do not create files for future phases.
-- Always plan first and wait for my approval before writing code.
-- **I run all deployments myself, to learn.** You write the code; you do NOT run
-  `terraform apply`, `terraform destroy`, `aws deploy ...`, the deploy scripts, or any AWS CLI
-  command that creates, changes or deletes resources, even if I seem to ask casually.
-  You may run `terraform fmt`, `terraform validate`, `ruff`, `pytest` and read-only checks.
-- **Teach mode for every deploy step**: give me the exact commands in order, explain what
-  each command does and what output to expect, tell me what to check in the AWS console
-  afterwards, and what to do if it fails. Then wait for me to paste the output.
+- **End-to-end run mode (current):** Claude builds AND deploys phases 2 to 8, then I learn
+  from the working system. For every phase, in order: code -> checks (fmt/validate/ruff/
+  pytest/`bash -n`) -> commit (`feat(phase-N): ...`) -> deploy -> run that phase's tests
+  -> record the result. Do not start the next phase until the current phase's
+  "done when" criteria pass.
+- **Claude MAY run**: `terraform init/plan/apply` for `bootstrap/` and `envs/dev/`, the
+  deploy scripts, `gh` CLI, and AWS CLI against resources of this project. Show the plan
+  summary (add/change/destroy) before every apply, and stop if a plan wants to destroy or
+  replace anything unexpected.
+- **Claude must NEVER**:
+  - destroy or modify `bootstrap/` after Phase 0 is deployed;
+  - delete S3 buckets or Terraform state files;
+  - run `terraform destroy` without asking me first;
+  - touch any AWS resource that was not created by this project.
+- **Stop and wait for me only when I must act by hand**: SNS email confirmation, Bedrock
+  model access, GitHub Environment reviewer approval, or a real blocker. Tell me exactly
+  what to click.
+- **Learning log**: keep `docs/deploy-log.md` updated: for every command run, the command,
+  why, what the output meant, and any error + how it was fixed.
 - When I paste an error, explain the likely cause first, then how to confirm it, then the fix.
 - Never hardcode or commit secrets, AWS keys, account IDs or my email.
   `terraform.tfvars` is gitignored; commit `terraform.tfvars.example` instead.
