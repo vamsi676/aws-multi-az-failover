@@ -82,3 +82,13 @@ output "failback_state_machine_arn" {
   description = "Failback state machine."
   value       = module.failover.failback_state_machine_arn
 }
+
+output "ci_ai_role_arn" {
+  description = "Role for the CI ai-analyze job (store as repo secret AWS_AI_ROLE_ARN)."
+  value       = module.ci_ai.role_arn
+}
+
+output "bedrock_model_id" {
+  description = "Bedrock model / inference profile used by the AI reporter."
+  value       = var.bedrock_model_id
+}

@@ -19,7 +19,9 @@
         "last_check": {},
         "precheck": {},
         "failed_state": "",
-        "error": {}
+        "error": {},
+        "ai_report": "",
+        "ai_analysis": ""
       },
       "Next": "Precheck"
     },
@@ -44,7 +46,12 @@
       "Output": "{% $states.result.Payload %}",
       "Retry": [
         {
-          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2
@@ -52,9 +59,14 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
-          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "Precheck"},
-          "Next": "NotifyFailure"
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "error": "{% $states.errorOutput %}",
+            "failed_state": "Precheck"
+          },
+          "Next": "AnalyzeFailure"
         }
       ],
       "Next": "ShouldProceed"
@@ -62,7 +74,10 @@
     "ShouldProceed": {
       "Type": "Choice",
       "Choices": [
-        {"Condition": "{% $states.input.proceed = true %}", "Next": "ScaleUpPrimary"}
+        {
+          "Condition": "{% $states.input.proceed = true %}",
+          "Next": "ScaleUpPrimary"
+        }
       ],
       "Default": "NotifySkipped"
     },
@@ -74,7 +89,16 @@
         "Subject": "[mazf] Failback SKIPPED",
         "Message": "{% $join(['Taskboard failback was SKIPPED. Nothing was scaled.', '', 'Reason: ' & $precheck.reason, '', 'Trigger:   ' & $trigger, 'Alarm time: ' & ($alarm_time = '' ? 'n/a' : $alarm_time), 'Checks:    ' & $string($precheck.checks), '', 'Execution: ' & $states.context.Execution.Id], '\\n') %}"
       },
-      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
       "Next": "Skipped"
     },
     "Skipped": {
@@ -85,13 +109,23 @@
       "Resource": "arn:aws:states:::lambda:invoke",
       "Arguments": {
         "FunctionName": "${scale_asg_arn}",
-        "Payload": {"asg_name": "{% $cfg.target_asg %}", "desired": 1}
+        "Payload": {
+          "asg_name": "{% $cfg.target_asg %}",
+          "desired": 1
+        }
       },
-      "Assign": {"t_scale_up": "{% $states.context.State.EnteredTime %}"},
+      "Assign": {
+        "t_scale_up": "{% $states.context.State.EnteredTime %}"
+      },
       "Output": "{% $states.result.Payload %}",
       "Retry": [
         {
-          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2
@@ -99,9 +133,14 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
-          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleUpPrimary"},
-          "Next": "NotifyFailure"
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "error": "{% $states.errorOutput %}",
+            "failed_state": "ScaleUpPrimary"
+          },
+          "Next": "AnalyzeFailure"
         }
       ],
       "Next": "WaitForTargets"
@@ -116,7 +155,10 @@
       "Resource": "arn:aws:states:::lambda:invoke",
       "Arguments": {
         "FunctionName": "${check_targets_arn}",
-        "Payload": {"target_group_arn": "${target_group_arn}", "asg_name": "{% $cfg.target_asg %}"}
+        "Payload": {
+          "target_group_arn": "${target_group_arn}",
+          "asg_name": "{% $cfg.target_asg %}"
+        }
       },
       "Assign": {
         "checks": "{% $checks + 1 %}",
@@ -126,7 +168,12 @@
       "Output": "{% $states.result.Payload %}",
       "Retry": [
         {
-          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2
@@ -134,9 +181,14 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
-          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "CheckTargets"},
-          "Next": "NotifyFailure"
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "error": "{% $states.errorOutput %}",
+            "failed_state": "CheckTargets"
+          },
+          "Next": "AnalyzeFailure"
         }
       ],
       "Next": "PrimaryHealthy"
@@ -145,8 +197,14 @@
       "Type": "Choice",
       "Comment": "Loop every 30s, at most ${max_checks} checks (about 15 minutes).",
       "Choices": [
-        {"Condition": "{% $states.input.healthy = true %}", "Next": "ScaleDownStandby"},
-        {"Condition": "{% $checks >= ${max_checks} %}", "Next": "TargetsTimedOut"}
+        {
+          "Condition": "{% $states.input.healthy = true %}",
+          "Next": "ScaleDownStandby"
+        },
+        {
+          "Condition": "{% $checks >= ${max_checks} %}",
+          "Next": "TargetsTimedOut"
+        }
       ],
       "Default": "WaitForTargets"
     },
@@ -156,7 +214,7 @@
         "error": "{% {'Error': 'PrimaryNotHealthy', 'Cause': 'No healthy target in primary ' & $cfg.target_asg & ' after ' & $string($checks) & ' checks. Last check: ' & $string($last_check)} %}",
         "failed_state": "PrimaryHealthy"
       },
-      "Next": "NotifyFailure"
+      "Next": "AnalyzeFailure"
     },
     "ScaleDownStandby": {
       "Type": "Task",
@@ -164,13 +222,23 @@
       "Resource": "arn:aws:states:::lambda:invoke",
       "Arguments": {
         "FunctionName": "${scale_asg_arn}",
-        "Payload": {"asg_name": "{% $cfg.source_asg %}", "desired": 0}
+        "Payload": {
+          "asg_name": "{% $cfg.source_asg %}",
+          "desired": 0
+        }
       },
-      "Assign": {"t_scale_down": "{% $states.context.State.EnteredTime %}"},
+      "Assign": {
+        "t_scale_down": "{% $states.context.State.EnteredTime %}"
+      },
       "Output": "{% $states.result.Payload %}",
       "Retry": [
         {
-          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2
@@ -178,9 +246,62 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
-          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleDownStandby"},
-          "Next": "NotifyFailure"
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "error": "{% $states.errorOutput %}",
+            "failed_state": "ScaleDownStandby"
+          },
+          "Next": "AnalyzeFailure"
+        }
+      ],
+      "Next": "WriteIncidentReport"
+    },
+    "WriteIncidentReport": {
+      "Type": "Task",
+      "Comment": "Bedrock writes a short report. Never on the recovery path: 30 s timeout, own Catch, plain message on any error.",
+      "Resource": "arn:aws:states:::bedrock:invokeModel",
+      "TimeoutSeconds": 30,
+      "Arguments": {
+        "ModelId": "${bedrock_model_arn}",
+        "ContentType": "application/json",
+        "Accept": "application/json",
+        "Body": {
+          "schemaVersion": "messages-v1",
+          "system": [
+            {
+              "text": ${incident_prompt}
+            }
+          ],
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "text": "{% 'Facts (JSON):\\n' & $string({'workflow': 'failback', 'result': 'SUCCEEDED', 'trigger': $trigger, 'alarm_time_utc': $alarm_time, 'execution_started_utc': $started_at, 'precheck_utc': $t_precheck, 'target_scaled_up_utc': $t_scale_up, 'target_healthy_utc': $t_last_check, 'health_checks_needed': $checks, 'source_scaled_down_utc': $t_scale_down, 'source': {'asg': $cfg.source_asg, 'az': $cfg.source_az}, 'target': {'asg': $cfg.target_asg, 'az': $cfg.target_az}, 'execution_duration_seconds': $round(($toMillis($states.context.State.EnteredTime) - $toMillis($started_at)) / 1000, 1), 'alarm_to_recovery_seconds': ($alarm_time = '' ? null : $round(($toMillis($t_last_check) - $toMillis($alarm_time)) / 1000, 1)), 'healthy_targets': $last_check.targets}) %}"
+                }
+              ]
+            }
+          ],
+          "inferenceConfig": {
+            "maxTokens": ${max_tokens},
+            "temperature": 0.2
+          }
+        }
+      },
+      "Assign": {
+        "ai_report": "{% $states.result.Body.output.message.content[0].text %}"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "ai_report": "{% '(AI incident report unavailable: ' & $states.errorOutput.Error & '. The facts above are complete.)' %}"
+          },
+          "Next": "NotifySuccess"
         }
       ],
       "Next": "NotifySuccess"
@@ -191,13 +312,70 @@
       "Arguments": {
         "TopicArn": "${sns_topic_arn}",
         "Subject": "{% '[mazf] Failback SUCCEEDED: ' & $cfg.source_az & ' -> ' & $cfg.target_az %}",
-        "Message": "{% $join(['Taskboard failback SUCCEEDED.', '', 'Traffic moved from ' & $cfg.source_asg & ' (' & $cfg.source_az & ') to ' & $cfg.target_asg & ' (' & $cfg.target_az & ').', '', 'Timeline (UTC):', '  Alarm:               ' & ($alarm_time = '' ? 'n/a (' & $trigger & ')' : $alarm_time), '  Execution started:   ' & $started_at, '  Precheck:            ' & $t_precheck, '  Primary scaled up:   ' & $t_scale_up, '  Primary healthy:     ' & $t_last_check & ' (check #' & $string($checks) & ')', '  Standby scaled down: ' & $t_scale_down, '', 'Execution duration: ' & $string($round(($toMillis($states.context.State.EnteredTime) - $toMillis($started_at)) / 1000, 1)) & ' s', 'Alarm to recovery:  ' & ($alarm_time = '' ? 'n/a' : $string($round(($toMillis($t_last_check) - $toMillis($alarm_time)) / 1000, 1)) & ' s'), 'Healthy targets:    ' & $string($last_check.targets), '', 'Traffic is back on the primary AZ. The standby ASG is at desired 0 again.', '', 'Execution: ' & $states.context.Execution.Id], '\\n') %}"
+        "Message": "{% $join(['Taskboard failback SUCCEEDED.', '', 'Traffic moved from ' & $cfg.source_asg & ' (' & $cfg.source_az & ') to ' & $cfg.target_asg & ' (' & $cfg.target_az & ').', '', 'Timeline (UTC):', '  Alarm:               ' & ($alarm_time = '' ? 'n/a (' & $trigger & ')' : $alarm_time), '  Execution started:   ' & $started_at, '  Precheck:            ' & $t_precheck, '  Primary scaled up:   ' & $t_scale_up, '  Primary healthy:     ' & $t_last_check & ' (check #' & $string($checks) & ')', '  Standby scaled down: ' & $t_scale_down, '', 'Execution duration: ' & $string($round(($toMillis($states.context.State.EnteredTime) - $toMillis($started_at)) / 1000, 1)) & ' s', 'Alarm to recovery:  ' & ($alarm_time = '' ? 'n/a' : $string($round(($toMillis($t_last_check) - $toMillis($alarm_time)) / 1000, 1)) & ' s'), 'Healthy targets:    ' & $string($last_check.targets), '', 'Traffic is back on the primary AZ. The standby ASG is at desired 0 again.', '', 'Execution: ' & $states.context.Execution.Id, '', '--- AI incident report (Amazon Bedrock; verify against the facts above) ---', $ai_report], '\\n') %}"
       },
-      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
       "Next": "Succeeded"
     },
     "Succeeded": {
       "Type": "Succeed"
+    },
+    "AnalyzeFailure": {
+      "Type": "Task",
+      "Comment": "Bedrock suggests a likely cause. Own Catch: on any error the plain FAILED message is still sent.",
+      "Resource": "arn:aws:states:::bedrock:invokeModel",
+      "TimeoutSeconds": 30,
+      "Arguments": {
+        "ModelId": "${bedrock_model_arn}",
+        "ContentType": "application/json",
+        "Accept": "application/json",
+        "Body": {
+          "schemaVersion": "messages-v1",
+          "system": [
+            {
+              "text": ${failure_prompt}
+            }
+          ],
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "text": "{% 'Facts (JSON):\\n' & $string({'workflow': 'failback', 'result': 'FAILED', 'failed_state': $failed_state, 'error': $string($error.Error), 'cause': $substring($string($error.Cause), 0, 1500), 'trigger': $trigger, 'alarm_time_utc': $alarm_time, 'execution_started_utc': $started_at, 'precheck_utc': $t_precheck, 'precheck_result': $precheck, 'target_scaled_up_utc': $t_scale_up, 'health_checks_done': $checks, 'last_health_check': $last_check, 'source': {'asg': $cfg.source_asg, 'az': $cfg.source_az}, 'target': {'asg': $cfg.target_asg, 'az': $cfg.target_az}}) %}"
+                }
+              ]
+            }
+          ],
+          "inferenceConfig": {
+            "maxTokens": ${max_tokens},
+            "temperature": 0.2
+          }
+        }
+      },
+      "Assign": {
+        "ai_analysis": "{% $states.result.Body.output.message.content[0].text %}"
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Assign": {
+            "ai_analysis": "{% '(AI failure analysis unavailable: ' & $states.errorOutput.Error & '. The facts above are complete.)' %}"
+          },
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "NotifyFailure"
     },
     "NotifyFailure": {
       "Type": "Task",
@@ -205,9 +383,18 @@
       "Arguments": {
         "TopicArn": "${sns_topic_arn}",
         "Subject": "[mazf] Failback FAILED",
-        "Message": "{% $join(['Taskboard failback FAILED.', '', 'Failed in state: ' & $failed_state, 'Error: ' & $string($error.Error), 'Cause: ' & $string($error.Cause), '', 'Trigger:  ' & $trigger, 'Alarm:    ' & ($alarm_time = '' ? 'n/a' : $alarm_time), 'Planned:  ' & $cfg.source_asg & ' (' & $cfg.source_az & ') -> ' & $cfg.target_asg & ' (' & $cfg.target_az & ')', 'Primary scaled up at: ' & ($t_scale_up = '' ? 'not reached' : $t_scale_up), '', 'Check both ASGs, the target group health and the execution history. Traffic may be on neither AZ.', '', 'Execution: ' & $states.context.Execution.Id], '\\n') %}"
+        "Message": "{% $join(['Taskboard failback FAILED.', '', 'Failed in state: ' & $failed_state, 'Error: ' & $string($error.Error), 'Cause: ' & $string($error.Cause), '', 'Trigger:  ' & $trigger, 'Alarm:    ' & ($alarm_time = '' ? 'n/a' : $alarm_time), 'Planned:  ' & $cfg.source_asg & ' (' & $cfg.source_az & ') -> ' & $cfg.target_asg & ' (' & $cfg.target_az & ')', 'Primary scaled up at: ' & ($t_scale_up = '' ? 'not reached' : $t_scale_up), '', 'Check both ASGs, the target group health and the execution history. Traffic may be on neither AZ.', '', 'Execution: ' & $states.context.Execution.Id, '', '--- AI failure analysis (Amazon Bedrock; suggestions only) ---', $ai_analysis], '\\n') %}"
       },
-      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
       "Next": "Failed"
     },
     "Failed": {

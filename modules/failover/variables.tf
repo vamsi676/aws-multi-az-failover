@@ -63,3 +63,19 @@ variable "max_checks" {
   type        = number
   default     = 30
 }
+
+variable "bedrock_model_arn" {
+  description = "Model or inference profile ARN used by the AI reporter states."
+  type        = string
+}
+
+variable "bedrock_resource_arns" {
+  description = "ARNs bedrock:InvokeModel is scoped to (profile + underlying foundation models)."
+  type        = list(string)
+}
+
+variable "bedrock_max_tokens" {
+  description = "Max output tokens for the AI report/analysis (keeps cost low)."
+  type        = number
+  default     = 600
+}

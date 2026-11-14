@@ -50,3 +50,24 @@ variable "azs" {
   type        = list(string)
   default     = ["us-east-1a", "us-east-1b"]
 }
+
+variable "bedrock_model_id" {
+  description = "Bedrock model ID or inference profile ID (newer models need a profile, e.g. us.amazon.nova-lite-v1:0). The request body uses the Amazon Nova messages-v1 format."
+  type        = string
+  default     = "us.amazon.nova-lite-v1:0"
+}
+
+variable "github_repository" {
+  description = "owner/repo allowed to use the CI AI analyzer role (CI passes github.repository)."
+  type        = string
+}
+
+variable "github_owner_id" {
+  description = "Numeric GitHub owner ID (immutable OIDC subject)."
+  type        = string
+}
+
+variable "github_repo_id" {
+  description = "Numeric GitHub repository ID (immutable OIDC subject)."
+  type        = string
+}

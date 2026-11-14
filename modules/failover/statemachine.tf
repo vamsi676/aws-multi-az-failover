@@ -44,6 +44,13 @@ data "aws_iam_policy_document" "sfn" {
     resources = [var.kms_key_arn]
   }
 
+  # AI reporter: one model / inference profile only.
+  statement {
+    sid       = "InvokeReporterModel"
+    actions   = ["bedrock:InvokeModel"]
+    resources = var.bedrock_resource_arns
+  }
+
   # CloudWatch Logs delivery for state machine logging (these APIs need "*").
   statement {
     sid = "LogDelivery"
@@ -90,6 +97,10 @@ resource "aws_sfn_state_machine" "failover" {
     codedeploy_app    = var.codedeploy_app
     deployment_group  = var.deployment_group
     max_checks        = var.max_checks
+    bedrock_model_arn = var.bedrock_model_arn
+    max_tokens        = var.bedrock_max_tokens
+    incident_prompt   = jsonencode(file("${path.module}/../../prompts/incident_report.txt"))
+    failure_prompt    = jsonencode(file("${path.module}/../../prompts/failure_analysis.txt"))
   })
 
   logging_configuration {
@@ -186,6 +197,10 @@ resource "aws_sfn_state_machine" "failback" {
     codedeploy_app    = var.codedeploy_app
     deployment_group  = var.deployment_group
     max_checks        = var.max_checks
+    bedrock_model_arn = var.bedrock_model_arn
+    max_tokens        = var.bedrock_max_tokens
+    incident_prompt   = jsonencode(file("${path.module}/../../prompts/incident_report.txt"))
+    failure_prompt    = jsonencode(file("${path.module}/../../prompts/failure_analysis.txt"))
   })
 
   logging_configuration {

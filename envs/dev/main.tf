@@ -1,3 +1,20 @@
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+
+locals {
+  # Cross-region inference profile IDs start with a geography prefix (us., eu., apac., global.).
+  bedrock_is_profile = can(regex("^(us|eu|apac|global)\\.", var.bedrock_model_id))
+  bedrock_base_model = local.bedrock_is_profile ? regex("^[a-z]+\\.(.+)$", var.bedrock_model_id)[0] : var.bedrock_model_id
+  bedrock_model_arn = (local.bedrock_is_profile
+    ? "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/${var.bedrock_model_id}"
+  : "arn:${data.aws_partition.current.partition}:bedrock:${var.aws_region}::foundation-model/${var.bedrock_model_id}")
+  # A profile routes to the foundation model in several regions, so allow that model in any region.
+  bedrock_resource_arns = [
+    local.bedrock_model_arn,
+    "arn:${data.aws_partition.current.partition}:bedrock:*::foundation-model/${local.bedrock_base_model}",
+  ]
+}
+
 # Artifacts bucket is long-lived (bootstrap); look it up instead of creating it.
 data "aws_s3_bucket" "artifacts" {
   bucket = var.artifacts_bucket_name
@@ -76,4 +93,17 @@ module "failover" {
   alarm_arn        = module.monitoring.alarm_arn
   codedeploy_app   = module.deploy.app_name
   deployment_group = module.deploy.deployment_group_name
+
+  bedrock_model_arn     = local.bedrock_model_arn
+  bedrock_resource_arns = local.bedrock_resource_arns
+}
+
+module "ci_ai" {
+  source = "../../modules/ci_ai"
+
+  name_prefix           = var.name_prefix
+  github_repository     = var.github_repository
+  github_owner_id       = var.github_owner_id
+  github_repo_id        = var.github_repo_id
+  bedrock_resource_arns = local.bedrock_resource_arns
 }
