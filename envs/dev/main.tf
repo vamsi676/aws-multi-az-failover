@@ -107,3 +107,20 @@ module "ci_ai" {
   github_repo_id        = var.github_repo_id
   bedrock_resource_arns = local.bedrock_resource_arns
 }
+
+module "scheduler" {
+  source = "../../modules/scheduler"
+
+  name_prefix      = var.name_prefix
+  asg_a_name       = module.compute.asg_a_name
+  asg_b_name       = module.compute.asg_b_name
+  asg_arns         = [module.compute.asg_a_arn, module.compute.asg_b_arn]
+  event_rule_name  = module.failover.event_rule_name
+  event_rule_arn   = module.failover.event_rule_arn
+  alarm_name       = module.monitoring.alarm_name
+  alarm_arn        = module.monitoring.alarm_arn
+  stop_expression  = var.schedule_stop_expression
+  start_expression = var.schedule_start_expression
+  timezone         = var.schedule_timezone
+  target_group_arn = module.nlb.target_group_arn
+}
