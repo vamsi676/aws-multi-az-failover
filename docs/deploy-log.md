@@ -242,3 +242,16 @@ source of truth (target health) for longer than metric delay + alarm periods.
 | `terraform plan -destroy -out=destroy.tfplan` (envs/dev) | **Test #10** (read-only part) | `0 to add, 0 to change, 74 to destroy`, all from envs/dev modules; **nothing** from bootstrap (state/artifacts buckets, gha roles, OIDC provider, budget). Saved plan removed; **destroy not run** (needs your OK) |
 
 **Test #9: PASS. Test #10: plan verified; destroy waits for approval.**
+
+---
+
+## Teardown
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| `terraform plan -destroy -out=destroy.tfplan` (envs/dev) | Rule: stop if anything from bootstrap is in the plan | `74 to destroy`, all from envs/dev modules; bootstrap matches: none |
+| `terraform apply destroy.tfplan` | Destroy envs/dev | `74 destroyed` in 4m17s |
+| `aws ec2 describe-instances / elbv2 describe-load-balancers / describe-target-groups / autoscaling / describe-addresses / describe-vpcs / describe-network-interfaces / stepfunctions / dynamodb` | Nothing left? | All **0**. KMS key `PendingDeletion` (7 days, no charge). Bootstrap buckets still there |
+| `gh api -X DELETE repos/<repo>/actions/runs/<id>/logs` ×4 | Remove logs that showed the account ID / IP | API `204`; `GET .../logs` now **404** for all 4 (`gh run view --log` still showed one from the **local gh cache**) |
+| `gh variable delete AWS_PLAN_ROLE_ARN / AWS_DEPLOY_ROLE_ARN / ALLOWED_CIDR` | Replaced by secrets in Phase 4 | Deleted; secrets unchanged |
+| `rm bootstrap/terraform.tfstate bootstrap/terraform.tfstate.backup`, `terraform -chdir=bootstrap plan -detailed-exitcode` | Stale local copies from before the S3 migration | Removed; bootstrap plan exit 0 (remote state intact) |
