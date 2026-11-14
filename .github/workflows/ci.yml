@@ -1,0 +1,182 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
+  TERRAFORM_VERSION: "1.11.4"
+
+jobs:
+  terraform-static:
+    name: terraform fmt / validate / tflint / checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tf-providers-${{ hashFiles('**/.terraform.lock.hcl') }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: terraform validate
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          for dir in bootstrap envs/dev; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+      - uses: terraform-linters/setup-tflint@v6
+        with:
+          tflint_version: v0.66.0
+
+      - name: tflint
+        run: |
+          tflint --init --config "$GITHUB_WORKSPACE/.tflint.hcl"
+          tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl" --format compact
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: checkov
+        run: |
+          pip install --quiet checkov==3.4.5
+          checkov -d . --config-file .checkov.yaml
+
+  python:
+    name: ruff + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: app/requirements*.txt
+
+      - name: Install dev dependencies
+        run: pip install -r app/requirements-dev.txt
+
+      - name: ruff
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: pytest (app)
+        working-directory: app
+        run: pytest -q
+
+  build:
+    name: build app bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Build bundle (not uploaded)
+        run: |
+          scripts/build_app.sh "${GITHUB_SHA::7}"
+          ls -lh dist/
+
+  plan:
+    name: terraform plan (envs/dev)
+    needs: terraform-static
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write       # OIDC token for the plan role
+      pull-requests: write  # plan comment
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tf-providers-${{ hashFiles('**/.terraform.lock.hcl') }}
+
+      - name: AWS credentials (plan role, read-only)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-session-name: gha-plan-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      - name: terraform init
+        working-directory: envs/dev
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          terraform init -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: terraform plan
+        id: plan
+        working-directory: envs/dev
+        env:
+          TF_VAR_owner: ${{ vars.TF_VAR_OWNER }}
+          TF_VAR_allowed_cidr: ${{ vars.ALLOWED_CIDR }}
+          TF_VAR_artifacts_bucket_name: ${{ vars.ARTIFACTS_BUCKET }}
+        run: |
+          terraform plan -no-color -lock-timeout=120s -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+
+      - name: Comment plan on the PR
+        if: always() && steps.plan.outcome != 'skipped'
+        working-directory: envs/dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          OUTCOME: ${{ steps.plan.outcome }}
+        run: |
+          touch plan.txt
+          summary="$(grep -E '^(Plan:|No changes)' plan.txt | tail -1)"
+          {
+            echo "### Terraform plan: \`envs/dev\` (${OUTCOME})"
+            echo
+            echo "**${summary:-plan failed, see the job log}**"
+            echo
+            echo "<details><summary>Show plan</summary>"
+            echo
+            echo '```'
+            # Mask 12-digit numbers (account IDs) before posting.
+            tail -n 300 plan.txt | sed -E 's/[0-9]{12}/************/g'
+            echo '```'
+            echo "</details>"
+            echo
+            echo "_Commit ${GITHUB_SHA::7}, run ${GITHUB_RUN_ID}_"
+          } > comment.md
+          gh pr comment "$PR" --body-file comment.md --edit-last --create-if-none

@@ -1,0 +1,4 @@
+# Copy to backend.hcl (gitignored) and fill in.
+# Use with: terraform init -migrate-state -backend-config=backend.hcl
+bucket  = "mazf-tfstate-xxxxxxxx" # value of `terraform output -raw state_bucket_name`
+profile = "your-aws-profile"

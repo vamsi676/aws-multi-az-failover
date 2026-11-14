@@ -42,3 +42,20 @@ terraform.rc
 # Optional: ignore plan files saved before destroying Terraform configuration
 # Uncomment the line below if you want to ignore planout files.
 # planout
+# --- Project additions ---
+# Backend config holds the state bucket name and local AWS profile (keep local)
+backend.hcl
+# Saved plan files
+tfplan
+*.tfplan
+# Python / build / CI logs
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+logs/
+# OS
+.DS_Store
+.terraform-plugin-cache/

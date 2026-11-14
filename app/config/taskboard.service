@@ -1,0 +1,28 @@
+[Unit]
+Description=Taskboard (FastAPI on uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=taskboard
+Group=taskboard
+WorkingDirectory=/opt/taskboard
+# TABLE_NAME, AWS_REGION (written by user_data)
+EnvironmentFile=/etc/taskboard/taskboard.env
+# Dependencies are vendored into the bundle at build time.
+Environment=PYTHONPATH=/opt/taskboard/vendor:/opt/taskboard
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3.11 -m uvicorn taskboard.main:app --host 127.0.0.1 --port 8000 --no-access-log
+# Restart on crashes only: a deliberate `systemctl stop` (outage simulation) stays stopped.
+Restart=on-failure
+RestartSec=2
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
