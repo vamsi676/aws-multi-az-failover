@@ -71,3 +71,21 @@ variable "github_repo_id" {
   description = "Numeric GitHub repository ID (immutable OIDC subject)."
   type        = string
 }
+
+variable "schedule_stop_expression" {
+  description = "Night stop (EventBridge Scheduler expression)."
+  type        = string
+  default     = "cron(0 22 * * ? *)"
+}
+
+variable "schedule_start_expression" {
+  description = "Morning start (EventBridge Scheduler expression)."
+  type        = string
+  default     = "cron(0 7 * * ? *)"
+}
+
+variable "schedule_timezone" {
+  description = "IANA time zone for the schedules."
+  type        = string
+  default     = "UTC"
+}

@@ -17,3 +17,8 @@ output "failback_state_machine_arn" {
   description = "Failback state machine ARN."
   value       = aws_sfn_state_machine.failback.arn
 }
+
+output "event_rule_arn" {
+  description = "ARN of the EventBridge rule that starts the failover."
+  value       = aws_cloudwatch_event_rule.alarm.arn
+}

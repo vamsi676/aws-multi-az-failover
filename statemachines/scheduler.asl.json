@@ -1,0 +1,104 @@
+{
+  "Comment": "Night stop / morning start of the app ASGs, in a safe order. Started by EventBridge Scheduler with {\"action\": \"stop\"|\"start\"}. Rendered by Terraform templatefile().",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Action",
+  "States": {
+    "Action": {
+      "Type": "Choice",
+      "Choices": [
+        {"Condition": "{% $states.input.action = 'stop' %}", "Next": "DisableFailoverRule"},
+        {"Condition": "{% $states.input.action = 'start' %}", "Next": "ScaleUpPrimary"}
+      ],
+      "Default": "UnknownAction"
+    },
+    "UnknownAction": {
+      "Type": "Fail",
+      "Error": "UnknownAction",
+      "Cause": "Input must be {\"action\": \"stop\"} or {\"action\": \"start\"}."
+    },
+
+    "DisableFailoverRule": {
+      "Type": "Task",
+      "Comment": "FIRST: otherwise scaling to 0 fires the alarm and the failover would scale the standby back up.",
+      "Resource": "arn:aws:states:::aws-sdk:eventbridge:disableRule",
+      "Arguments": {"Name": "${event_rule_name}"},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "MuteAlarm"
+    },
+    "MuteAlarm": {
+      "Type": "Task",
+      "Comment": "No ALARM emails for a planned stop.",
+      "Resource": "arn:aws:states:::aws-sdk:cloudwatch:disableAlarmActions",
+      "Arguments": {"AlarmNames": ["${alarm_name}"]},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "ScaleDownPrimary"
+    },
+    "ScaleDownPrimary": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:autoscaling:setDesiredCapacity",
+      "Arguments": {"AutoScalingGroupName": "${asg_a_name}", "DesiredCapacity": 0, "HonorCooldown": false},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "ScaleDownStandby"
+    },
+    "ScaleDownStandby": {
+      "Type": "Task",
+      "Comment": "Also the standby, in case the app is failed over to it.",
+      "Resource": "arn:aws:states:::aws-sdk:autoscaling:setDesiredCapacity",
+      "Arguments": {"AutoScalingGroupName": "${asg_b_name}", "DesiredCapacity": 0, "HonorCooldown": false},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "Stopped"
+    },
+    "Stopped": {
+      "Type": "Succeed"
+    },
+
+    "ScaleUpPrimary": {
+      "Type": "Task",
+      "Comment": "Mornings always start on the primary AZ (ASG-a).",
+      "Resource": "arn:aws:states:::aws-sdk:autoscaling:setDesiredCapacity",
+      "Arguments": {"AutoScalingGroupName": "${asg_a_name}", "DesiredCapacity": 1, "HonorCooldown": false},
+      "Assign": {"polls": 0},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "WaitForAlarmOk"
+    },
+    "WaitForAlarmOk": {
+      "Type": "Wait",
+      "Seconds": 60,
+      "Next": "GetAlarmState"
+    },
+    "GetAlarmState": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:cloudwatch:describeAlarms",
+      "Arguments": {"AlarmNames": ["${alarm_name}"]},
+      "Assign": {"polls": "{% $polls + 1 %}"},
+      "Output": "{% {'state': $states.result.MetricAlarms[0].StateValue} %}",
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "AlarmOk"
+    },
+    "AlarmOk": {
+      "Type": "Choice",
+      "Comment": "Re-arm only when the alarm is OK (app healthy), or after ~25 min so the guard is never left off.",
+      "Choices": [
+        {"Condition": "{% $states.input.state = 'OK' or $polls >= 25 %}", "Next": "EnableFailoverRule"}
+      ],
+      "Default": "WaitForAlarmOk"
+    },
+    "EnableFailoverRule": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:eventbridge:enableRule",
+      "Arguments": {"Name": "${event_rule_name}"},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "UnmuteAlarm"
+    },
+    "UnmuteAlarm": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:cloudwatch:enableAlarmActions",
+      "Arguments": {"AlarmNames": ["${alarm_name}"]},
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 5, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "Started"
+    },
+    "Started": {
+      "Type": "Succeed"
+    }
+  }
+}

@@ -92,3 +92,8 @@ output "bedrock_model_id" {
   description = "Bedrock model / inference profile used by the AI reporter."
   value       = var.bedrock_model_id
 }
+
+output "scheduler_state_machine_arn" {
+  description = "Night stop / morning start state machine."
+  value       = module.scheduler.state_machine_arn
+}
