@@ -93,6 +93,10 @@ jobs:
         working-directory: app
         run: pytest -q
 
+      - name: pytest (lambdas)
+        working-directory: lambda
+        run: pytest -q
+
   build:
     name: build app bundle
     runs-on: ubuntu-latest

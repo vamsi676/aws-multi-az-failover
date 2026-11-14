@@ -60,3 +60,20 @@ module "monitoring" {
   nlb_arn_suffix          = module.nlb.nlb_arn_suffix
   target_group_arn_suffix = module.nlb.target_group_arn_suffix
 }
+
+module "failover" {
+  source = "../../modules/failover"
+
+  name_prefix      = var.name_prefix
+  active_asg_name  = module.compute.asg_a_name
+  standby_asg_name = module.compute.asg_b_name
+  asg_arns         = [module.compute.asg_a_arn, module.compute.asg_b_arn]
+  active_az        = var.azs[0]
+  standby_az       = var.azs[1]
+  target_group_arn = module.nlb.target_group_arn
+  sns_topic_arn    = module.monitoring.sns_topic_arn
+  kms_key_arn      = module.monitoring.kms_key_arn
+  alarm_arn        = module.monitoring.alarm_arn
+  codedeploy_app   = module.deploy.app_name
+  deployment_group = module.deploy.deployment_group_name
+}
