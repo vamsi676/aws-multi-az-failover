@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Taskboard status</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Taskboard &middot; Failover status</div>
+    <nav><a href="/">Board</a></nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <span id="state" class="badge">Checking&hellip;</span>
+      <div>
+        <div id="where" class="where">&hellip;</div>
+        <div id="detail" class="detail">&nbsp;</div>
+      </div>
+    </section>
+
+    <section class="stats">
+      <div class="stat"><div class="label">Availability (since page open)</div><div id="availability" class="value">&ndash;</div></div>
+      <div class="stat"><div class="label">Checks ok / total</div><div id="checks" class="value">&ndash;</div></div>
+      <div class="stat"><div class="label">Current outage</div><div id="current" class="value">&ndash;</div></div>
+      <div class="stat"><div class="label">Last downtime (RTO)</div><div id="rto" class="value">&ndash;</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Last 60 checks (every 2s)</h2>
+      <div id="timeline" class="timeline"></div>
+      <div class="legend"><span class="a">AZ a</span><span class="b">AZ b</span><span class="d">Failed</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Events</h2>
+      <ul id="events" class="events"><li>Watching&hellip;</li></ul>
+    </section>
+  </main>
+
+<script>
+"use strict";
+const MAX_TICKS = 60;
+const POLL_MS = 2000;
+
+const ticks = [];
+const events = [];
+let total = 0;
+let okCount = 0;
+let downSince = null;
+let lastAz = null;
+let lastRto = null;
+
+function azClass(az) {
+  return az.endsWith("a") ? "az-a" : az.endsWith("b") ? "az-b" : "";
+}
+
+function fmtTime(ms) {
+  return new Date(ms).toLocaleTimeString();
+}
+
+function fmtSeconds(s) {
+  return s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${s.toFixed(1)}s`;
+}
+
+function addEvent(t, text) {
+  events.unshift({ t, text });
+  if (events.length > 20) events.pop();
+}
+
+async function check() {
+  const t = Date.now();
+  let entry = { ok: false, t };
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch("/api/meta", { cache: "no-store", signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    entry = { ok: true, t, meta: await res.json() };
+  } catch {
+    // stays { ok: false }
+  }
+
+  total += 1;
+  if (entry.ok) okCount += 1;
+
+  if (!entry.ok && downSince === null) {
+    downSince = t;
+    addEvent(t, "Outage started (app not answering)");
+  }
+  if (entry.ok) {
+    const az = entry.meta.availability_zone;
+    if (downSince !== null) {
+      lastRto = (t - downSince) / 1000;
+      addEvent(t, `Recovered on ${az} after ${fmtSeconds(lastRto)}`);
+      downSince = null;
+    }
+    if (lastAz !== null && az !== lastAz) addEvent(t, `AZ changed ${lastAz} → ${az}`);
+    if (lastAz === null) addEvent(t, `Serving from ${az}`);
+    lastAz = az;
+  }
+
+  ticks.push(entry);
+  if (ticks.length > MAX_TICKS) ticks.shift();
+  render(entry);
+}
+
+function render(latest) {
+  const state = document.getElementById("state");
+  const where = document.getElementById("where");
+  const detail = document.getElementById("detail");
+
+  if (latest.ok) {
+    const m = latest.meta;
+    state.className = `badge ${azClass(m.availability_zone)}`;
+    state.textContent = "UP";
+    where.textContent = `Serving from ${m.availability_zone}`;
+    detail.textContent = `Instance ${m.instance_id} (${m.instance_type}) · Version ${m.version}`;
+  } else {
+    state.className = "badge down";
+    state.textContent = "DOWN";
+    where.textContent = "No response";
+    detail.textContent = `Last good AZ: ${lastAz ?? "none yet"}`;
+  }
+
+  document.getElementById("availability").textContent = `${((okCount / total) * 100).toFixed(1)}%`;
+  document.getElementById("checks").textContent = `${okCount} / ${total}`;
+  document.getElementById("current").textContent =
+    downSince === null ? "none" : fmtSeconds((Date.now() - downSince) / 1000);
+  document.getElementById("rto").textContent = lastRto === null ? "none yet" : fmtSeconds(lastRto);
+
+  const timeline = document.getElementById("timeline");
+  timeline.replaceChildren();
+  for (let i = 0; i < MAX_TICKS - ticks.length; i += 1) {
+    timeline.append(Object.assign(document.createElement("div"), { className: "tick" }));
+  }
+  for (const tk of ticks) {
+    const div = document.createElement("div");
+    div.className = `tick ${tk.ok ? azClass(tk.meta.availability_zone) : "down"}`;
+    div.title = `${fmtTime(tk.t)} ${tk.ok ? tk.meta.availability_zone : "failed"}`;
+    timeline.append(div);
+  }
+
+  const list = document.getElementById("events");
+  list.replaceChildren();
+  for (const ev of events) {
+    const li = document.createElement("li");
+    const time = document.createElement("time");
+    time.textContent = fmtTime(ev.t);
+    li.append(time, document.createTextNode(ev.text));
+    list.append(li);
+  }
+}
+
+async function loop() {
+  await check();
+  setTimeout(loop, POLL_MS);
+}
+loop();
+</script>
+</body>
+</html>

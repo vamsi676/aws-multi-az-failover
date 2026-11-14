@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Taskboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="banner" class="banner" hidden>Connection lost, retrying&hellip;</div>
+
+  <header class="topbar">
+    <div class="brand">Taskboard</div>
+    <span id="az-badge" class="badge">Connecting&hellip;</span>
+    <nav><a href="/status">Status</a></nav>
+  </header>
+
+  <main>
+    <form id="new-task" class="new-task" autocomplete="off">
+      <input id="title" maxlength="200" placeholder="Add a task&hellip;" required aria-label="Task title">
+      <select id="priority" aria-label="Priority">
+        <option value="low">Low</option>
+        <option value="med" selected>Medium</option>
+        <option value="high">High</option>
+      </select>
+      <button class="primary" type="submit">Add task</button>
+    </form>
+
+    <section class="board">
+      <div class="column" data-status="todo"><h2>To do <span class="count"></span></h2><ul class="cards"></ul></div>
+      <div class="column" data-status="in_progress"><h2>In progress <span class="count"></span></h2><ul class="cards"></ul></div>
+      <div class="column" data-status="done"><h2>Done <span class="count"></span></h2><ul class="cards"></ul></div>
+    </section>
+  </main>
+
+  <footer id="footer">&nbsp;</footer>
+
+<script>
+"use strict";
+const STATUSES = ["todo", "in_progress", "done"];
+const PRIORITY_LABEL = { low: "Low", med: "Medium", high: "High" };
+const POLL_MS = 2000;
+
+const banner = document.getElementById("banner");
+const badge = document.getElementById("az-badge");
+const footer = document.getElementById("footer");
+let lastTasksJson = "";
+let dragging = false;
+
+async function api(path, options = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const res = await fetch(path, {
+      ...options,
+      cache: "no-store",
+      signal: ctrl.signal,
+      headers: { "Content-Type": "application/json" },
+    });
+    if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function setOnline(online) {
+  banner.hidden = online;
+  if (!online) {
+    badge.className = "badge down";
+    badge.textContent = "Disconnected";
+  }
+}
+
+function renderMeta(m) {
+  const az = m.availability_zone || "unknown";
+  badge.className = "badge " + (az.endsWith("a") ? "az-a" : az.endsWith("b") ? "az-b" : "");
+  badge.textContent = `Served from ${az}`;
+  footer.textContent =
+    `Instance ${m.instance_id} (${m.instance_type}) · Table ${m.table_name} · Version ${m.version}`;
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function renderTasks(tasks) {
+  const json = JSON.stringify(tasks);
+  if (json === lastTasksJson || dragging) return;
+  lastTasksJson = json;
+
+  for (const status of STATUSES) {
+    const column = document.querySelector(`.column[data-status="${status}"]`);
+    const list = column.querySelector(".cards");
+    const items = tasks.filter((t) => t.status === status);
+    column.querySelector(".count").textContent = `(${items.length})`;
+    list.replaceChildren();
+    if (items.length === 0) list.append(el("li", "empty", "No tasks"));
+
+    for (const task of items) {
+      const card = el("li", "card");
+      card.draggable = true;
+      card.dataset.id = task.id;
+      card.addEventListener("dragstart", (e) => {
+        dragging = true;
+        e.dataTransfer.setData("text/plain", task.id);
+      });
+      card.addEventListener("dragend", () => { dragging = false; });
+
+      card.append(el("div", `pill ${task.priority}`, PRIORITY_LABEL[task.priority] || task.priority));
+      card.append(el("div", "title", task.title));
+
+      const row = el("div", "row");
+      const idx = STATUSES.indexOf(status);
+      const back = el("button", "", "←");
+      back.title = "Move left";
+      back.disabled = idx === 0;
+      back.onclick = () => moveTask(task.id, STATUSES[idx - 1]);
+      const fwd = el("button", "", "→");
+      fwd.title = "Move right";
+      fwd.disabled = idx === STATUSES.length - 1;
+      fwd.onclick = () => moveTask(task.id, STATUSES[idx + 1]);
+      const del = el("button", "", "Delete");
+      del.onclick = () => deleteTask(task.id);
+      row.append(back, fwd, el("span", "spacer"), del);
+      card.append(row);
+      list.append(card);
+    }
+  }
+}
+
+async function refresh() {
+  try {
+    const [metaRes, tasksRes] = await Promise.all([api("/api/meta"), api("/api/tasks")]);
+    renderMeta(await metaRes.json());
+    renderTasks(await tasksRes.json());
+    setOnline(true);
+  } catch {
+    setOnline(false);
+  }
+}
+
+async function mutate(path, options) {
+  try {
+    await api(path, options);
+    lastTasksJson = "";
+    await refresh();
+  } catch {
+    setOnline(false);
+  }
+}
+
+function moveTask(id, status) {
+  return mutate(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+}
+
+function deleteTask(id) {
+  return mutate(`/api/tasks/${id}`, { method: "DELETE" });
+}
+
+document.getElementById("new-task").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = document.getElementById("title");
+  const priority = document.getElementById("priority").value;
+  if (!title.value.trim()) return;
+  await mutate("/api/tasks", {
+    method: "POST",
+    body: JSON.stringify({ title: title.value.trim(), priority }),
+  });
+  title.value = "";
+  title.focus();
+});
+
+for (const column of document.querySelectorAll(".column")) {
+  column.addEventListener("dragover", (e) => { e.preventDefault(); column.classList.add("drop-target"); });
+  column.addEventListener("dragleave", () => column.classList.remove("drop-target"));
+  column.addEventListener("drop", (e) => {
+    e.preventDefault();
+    column.classList.remove("drop-target");
+    dragging = false;
+    const id = e.dataTransfer.getData("text/plain");
+    if (id) moveTask(id, column.dataset.status);
+  });
+}
+
+async function loop() {
+  await refresh();
+  setTimeout(loop, POLL_MS);
+}
+loop();
+</script>
+</body>
+</html>

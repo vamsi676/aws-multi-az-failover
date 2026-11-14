@@ -39,6 +39,7 @@ module "compute" {
   subnet_b_id          = module.network.subnet_ids[var.azs[1]]
   instance_sg_id       = module.network.instance_sg_id
   target_group_arn     = module.nlb.target_group_arn
+  table_name           = module.data.table_name
   table_arn            = module.data.table_arn
   artifacts_bucket_arn = data.aws_s3_bucket.artifacts.arn
 }

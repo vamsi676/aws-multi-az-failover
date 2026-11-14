@@ -18,7 +18,8 @@ resource "aws_launch_template" "this" {
   update_default_version = true
 
   user_data = base64encode(templatefile("${path.module}/user_data.sh", {
-    region = data.aws_region.current.region
+    region     = data.aws_region.current.region
+    table_name = var.table_name
   }))
 
   iam_instance_profile {

@@ -35,6 +35,11 @@ variable "target_group_arn" {
   type        = string
 }
 
+variable "table_name" {
+  description = "DynamoDB table name, written to /etc/taskboard/taskboard.env for the app."
+  type        = string
+}
+
 variable "table_arn" {
   description = "DynamoDB table the app may access."
   type        = string
