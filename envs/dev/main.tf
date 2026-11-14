@@ -51,3 +51,12 @@ module "deploy" {
   asg_names         = [module.compute.asg_a_name, module.compute.asg_b_name]
   instance_role_arn = module.compute.instance_role_arn
 }
+
+module "monitoring" {
+  source = "../../modules/monitoring"
+
+  name_prefix             = var.name_prefix
+  alert_email             = var.alert_email
+  nlb_arn_suffix          = module.nlb.nlb_arn_suffix
+  target_group_arn_suffix = module.nlb.target_group_arn_suffix
+}
