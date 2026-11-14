@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and fill in real values.
+aws_profile      = "your-aws-profile"
+aws_region       = "us-east-1"
+name_prefix      = "mazf"
+owner            = "your-name"
+budget_email     = "you@example.com"
+budget_limit_usd = 10
+github_owner     = "your-github-user"
+github_repo      = "aws-multi-az-failover"
