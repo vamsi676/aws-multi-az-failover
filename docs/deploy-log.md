@@ -57,3 +57,26 @@ Conventions: `$P` = `--profile <aws-profile>`; commands run from the repo root u
 ---
 
 ## Phase 2: Taskboard app
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| `uv venv --python 3.11 .venv` | Local Python matching the instances (3.11) | `Python 3.11.12` |
+| `uv pip compile app/requirements.in --python-version 3.11 --python-platform x86_64-manylinux2014` | Pin exact versions resolved **for the instance platform**, not for the Mac | fastapi 0.162.7, uvicorn 0.54.0, boto3 1.44.3, pydantic-core 2.50.4 ... |
+| `ruff check . && ruff format --check .` | Lint/format | First run: `I001 import block un-sorted`: ruff did not know `taskboard` is first-party. **Fix:** `src = ["app"]` in `ruff.toml` |
+| `cd app && pytest -q` | Unit tests with DynamoDB mocked by moto | `16 passed` |
+| `bash -n` on hooks/scripts, `terraform validate` | Syntax checks | OK |
+| `PYTHON=.venv/bin/python scripts/build_app.sh` | Build bundle with vendored Linux wheels | `dist/taskboard-<sha>.zip`, 20 MB, contains `_pydantic_core.cpython-311-x86_64-linux-gnu.so` (Linux binary built on a Mac via `--platform`) |
+| `terraform plan` (envs/dev) | user_data now writes `/etc/taskboard/taskboard.env` (TABLE_NAME, region) | `0 to add, 1 to change, 0 to destroy`: launch template updated **in place** (new version) |
+| `terraform apply tfplan` | — | `1 changed` |
+| `aws autoscaling start-instance-refresh --auto-scaling-group-name mazf-asg-a --preferences MinHealthyPercentage=0,InstanceWarmup=60` | The running instance was launched from LT v1 (no env file). Instance refresh is the right tool for **launch template** changes | `Pending -> InProgress 50% -> 100% -> Successful` in ~4 min (terminate old, launch new, warm-up) |
+| `aws ssm send-command ... cloud-init status --wait; cat /etc/taskboard/taskboard.env` | Do not deploy before user_data finished | `status: done`, env file present, agent active |
+| `scripts/deploy_app.sh dist/taskboard-<sha>.zip` | Upload to `releases/<sha>.zip`, `aws deploy create-deployment`, `aws deploy wait deployment-successful` | `Succeeded` in **23 s** |
+| `aws elbv2 describe-target-health` | Wait for the NLB to see the app | `unhealthy -> healthy` within ~20 s (2 checks × 10 s) |
+| `curl /healthz`, `/api/meta`, POST/PATCH `/api/tasks`, `/`, `/status` | Done-criteria | 200 + `cache-control: no-store`; meta shows `us-east-1a` + version; 4×201, PATCH 200 |
+| `aws dynamodb scan --table-name mazf-tasks` | Prove the data lives in DynamoDB, not on the instance | All 4 tasks present, one `in_progress` |
+
+**Phase 2 result: PASS.**
+
+---
+
+## Phase 3: CI/CD
