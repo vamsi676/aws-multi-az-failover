@@ -87,5 +87,5 @@ variable "schedule_start_expression" {
 variable "schedule_timezone" {
   description = "IANA time zone for the schedules."
   type        = string
-  default     = "UTC"
+  default     = "America/New_York"
 }

@@ -122,4 +122,5 @@ module "scheduler" {
   stop_expression  = var.schedule_stop_expression
   start_expression = var.schedule_start_expression
   timezone         = var.schedule_timezone
+  target_group_arn = module.nlb.target_group_arn
 }

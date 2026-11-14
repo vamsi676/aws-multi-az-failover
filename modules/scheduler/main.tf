@@ -44,6 +44,12 @@ data "aws_iam_policy_document" "sfn" {
   }
 
   statement {
+    sid       = "ReadTargetHealth"
+    actions   = ["elasticloadbalancing:DescribeTargetHealth"]
+    resources = ["*"] # Describe* does not support resource-level permissions
+  }
+
+  statement {
     sid       = "ScaleOurAsgs"
     actions   = ["autoscaling:SetDesiredCapacity"]
     resources = var.asg_arns
@@ -82,10 +88,13 @@ resource "aws_sfn_state_machine" "this" {
   role_arn = aws_iam_role.sfn.arn
 
   definition = templatefile("${path.module}/../../statemachines/scheduler.asl.json", {
-    asg_a_name      = var.asg_a_name
-    asg_b_name      = var.asg_b_name
-    event_rule_name = var.event_rule_name
-    alarm_name      = var.alarm_name
+    asg_a_name          = var.asg_a_name
+    asg_b_name          = var.asg_b_name
+    event_rule_name     = var.event_rule_name
+    alarm_name          = var.alarm_name
+    target_group_arn    = var.target_group_arn
+    rearm_after_minutes = var.rearm_after_minutes
+    max_polls           = var.max_rearm_wait_minutes
   })
 
   logging_configuration {

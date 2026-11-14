@@ -53,5 +53,22 @@ variable "start_expression" {
 variable "timezone" {
   description = "IANA time zone for both schedules."
   type        = string
-  default     = "UTC"
+  default     = "America/New_York"
+}
+
+variable "target_group_arn" {
+  description = "NLB target group checked before re-arming the failover."
+  type        = string
+}
+
+variable "rearm_after_minutes" {
+  description = "Consecutive healthy minutes before re-arming (must exceed NLB metric delay + 2 alarm periods)."
+  type        = number
+  default     = 7
+}
+
+variable "max_rearm_wait_minutes" {
+  description = "Re-arm anyway after this many minutes so the failover guard is never left off."
+  type        = number
+  default     = 30
 }

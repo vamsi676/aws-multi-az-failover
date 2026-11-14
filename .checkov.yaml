@@ -38,3 +38,4 @@ skip-check:
   - CKV_AWS_272   # Lambda code signing: overkill for a learning project
   - CKV_AWS_50    # Lambda X-Ray: not needed; logs + Step Functions history are enough
   - CKV_AWS_284   # Step Functions X-Ray: same reason
+  - CKV_AWS_297   # Scheduler CMK: schedule input is only {"action": "stop"/"start"}, nothing sensitive
