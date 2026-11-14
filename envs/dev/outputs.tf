@@ -77,3 +77,8 @@ output "failover_state_machine_arn" {
   description = "Failover state machine."
   value       = module.failover.failover_state_machine_arn
 }
+
+output "failback_state_machine_arn" {
+  description = "Failback state machine."
+  value       = module.failover.failback_state_machine_arn
+}

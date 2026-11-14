@@ -159,3 +159,40 @@ resource "aws_cloudwatch_event_target" "failover" {
   arn      = aws_sfn_state_machine.failover.arn
   role_arn = aws_iam_role.events.arn
 }
+
+# ---------------------------------------------------------------------------
+# Failback (manual, scripts/start_failback.sh): same pattern, reverse direction.
+# ---------------------------------------------------------------------------
+resource "aws_cloudwatch_log_group" "failback" {
+  name              = "/aws/vendedlogs/states/${var.name_prefix}-failback"
+  retention_in_days = 7
+}
+
+resource "aws_sfn_state_machine" "failback" {
+  name     = "${var.name_prefix}-failback"
+  type     = "STANDARD"
+  role_arn = aws_iam_role.sfn.arn
+
+  definition = templatefile("${path.module}/../../statemachines/failback.asl.json", {
+    source_asg        = var.standby_asg_name
+    target_asg        = var.active_asg_name
+    source_az         = var.standby_az
+    target_az         = var.active_az
+    precheck_arn      = aws_lambda_function.this["precheck"].arn
+    scale_asg_arn     = aws_lambda_function.this["scale_asg"].arn
+    check_targets_arn = aws_lambda_function.this["check_targets"].arn
+    sns_topic_arn     = var.sns_topic_arn
+    target_group_arn  = var.target_group_arn
+    codedeploy_app    = var.codedeploy_app
+    deployment_group  = var.deployment_group
+    max_checks        = var.max_checks
+  })
+
+  logging_configuration {
+    level                  = "ERROR"
+    include_execution_data = true
+    log_destination        = "${aws_cloudwatch_log_group.failback.arn}:*"
+  }
+
+  depends_on = [aws_iam_role_policy.sfn]
+}

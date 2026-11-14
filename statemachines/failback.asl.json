@@ -1,0 +1,219 @@
+{
+  "Comment": "Taskboard failback (manual): move traffic from the standby ASG/AZ back to the primary ASG/AZ. Rendered by Terraform templatefile().",
+  "QueryLanguage": "JSONata",
+  "StartAt": "Init",
+  "States": {
+    "Init": {
+      "Type": "Pass",
+      "Comment": "Defaults come from Terraform; a manual start may pass {\"overrides\": {...}} (used by the failure-path test).",
+      "Assign": {
+        "cfg": "{% $merge([{'source_asg': '${source_asg}', 'target_asg': '${target_asg}', 'source_az': '${source_az}', 'target_az': '${target_az}'}, $exists($states.input.overrides) ? $states.input.overrides : {}]) %}",
+        "trigger": "{% $exists($states.input.detail.alarmName) ? ('CloudWatch alarm ' & $states.input.detail.alarmName) : 'Manual failback (scripts/start_failback.sh)' %}",
+        "alarm_time": "{% $exists($states.input.time) ? $states.input.time : '' %}",
+        "started_at": "{% $states.context.Execution.StartTime %}",
+        "checks": 0,
+        "t_precheck": "",
+        "t_scale_up": "",
+        "t_last_check": "",
+        "t_scale_down": "",
+        "last_check": {},
+        "precheck": {},
+        "failed_state": "",
+        "error": {}
+      },
+      "Next": "Precheck"
+    },
+    "Precheck": {
+      "Type": "Task",
+      "Comment": "Same guards: skip if the primary ASG is already up, another failback runs, or a deployment is in progress.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${precheck_arn}",
+        "Payload": {
+          "state_machine_arn": "{% $states.context.StateMachine.Id %}",
+          "execution_arn": "{% $states.context.Execution.Id %}",
+          "standby_asg": "{% $cfg.target_asg %}",
+          "codedeploy_app": "${codedeploy_app}",
+          "deployment_group": "${deployment_group}"
+        }
+      },
+      "Assign": {
+        "precheck": "{% $states.result.Payload %}",
+        "t_precheck": "{% $states.context.State.EnteredTime %}"
+      },
+      "Output": "{% $states.result.Payload %}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "Precheck"},
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "ShouldProceed"
+    },
+    "ShouldProceed": {
+      "Type": "Choice",
+      "Choices": [
+        {"Condition": "{% $states.input.proceed = true %}", "Next": "ScaleUpPrimary"}
+      ],
+      "Default": "NotifySkipped"
+    },
+    "NotifySkipped": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[mazf] Failback SKIPPED",
+        "Message": "{% $join(['Taskboard failback was SKIPPED. Nothing was scaled.', '', 'Reason: ' & $precheck.reason, '', 'Trigger:   ' & $trigger, 'Alarm time: ' & ($alarm_time = '' ? 'n/a' : $alarm_time), 'Checks:    ' & $string($precheck.checks), '', 'Execution: ' & $states.context.Execution.Id], '\\n') %}"
+      },
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "Skipped"
+    },
+    "Skipped": {
+      "Type": "Succeed"
+    },
+    "ScaleUpPrimary": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${scale_asg_arn}",
+        "Payload": {"asg_name": "{% $cfg.target_asg %}", "desired": 1}
+      },
+      "Assign": {"t_scale_up": "{% $states.context.State.EnteredTime %}"},
+      "Output": "{% $states.result.Payload %}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleUpPrimary"},
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "WaitForTargets"
+    },
+    "WaitForTargets": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "CheckTargets"
+    },
+    "CheckTargets": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${check_targets_arn}",
+        "Payload": {"target_group_arn": "${target_group_arn}", "asg_name": "{% $cfg.target_asg %}"}
+      },
+      "Assign": {
+        "checks": "{% $checks + 1 %}",
+        "last_check": "{% $states.result.Payload %}",
+        "t_last_check": "{% $states.context.State.EnteredTime %}"
+      },
+      "Output": "{% $states.result.Payload %}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "CheckTargets"},
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "PrimaryHealthy"
+    },
+    "PrimaryHealthy": {
+      "Type": "Choice",
+      "Comment": "Loop every 30s, at most ${max_checks} checks (about 15 minutes).",
+      "Choices": [
+        {"Condition": "{% $states.input.healthy = true %}", "Next": "ScaleDownStandby"},
+        {"Condition": "{% $checks >= ${max_checks} %}", "Next": "TargetsTimedOut"}
+      ],
+      "Default": "WaitForTargets"
+    },
+    "TargetsTimedOut": {
+      "Type": "Pass",
+      "Assign": {
+        "error": "{% {'Error': 'PrimaryNotHealthy', 'Cause': 'No healthy target in primary ' & $cfg.target_asg & ' after ' & $string($checks) & ' checks. Last check: ' & $string($last_check)} %}",
+        "failed_state": "PrimaryHealthy"
+      },
+      "Next": "NotifyFailure"
+    },
+    "ScaleDownStandby": {
+      "Type": "Task",
+      "Comment": "Only after the primary is healthy: never leave the app with zero instances.",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Arguments": {
+        "FunctionName": "${scale_asg_arn}",
+        "Payload": {"asg_name": "{% $cfg.source_asg %}", "desired": 0}
+      },
+      "Assign": {"t_scale_down": "{% $states.context.State.EnteredTime %}"},
+      "Output": "{% $states.result.Payload %}",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Assign": {"error": "{% $states.errorOutput %}", "failed_state": "ScaleDownStandby"},
+          "Next": "NotifyFailure"
+        }
+      ],
+      "Next": "NotifySuccess"
+    },
+    "NotifySuccess": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "{% '[mazf] Failback SUCCEEDED: ' & $cfg.source_az & ' -> ' & $cfg.target_az %}",
+        "Message": "{% $join(['Taskboard failback SUCCEEDED.', '', 'Traffic moved from ' & $cfg.source_asg & ' (' & $cfg.source_az & ') to ' & $cfg.target_asg & ' (' & $cfg.target_az & ').', '', 'Timeline (UTC):', '  Alarm:               ' & ($alarm_time = '' ? 'n/a (' & $trigger & ')' : $alarm_time), '  Execution started:   ' & $started_at, '  Precheck:            ' & $t_precheck, '  Primary scaled up:   ' & $t_scale_up, '  Primary healthy:     ' & $t_last_check & ' (check #' & $string($checks) & ')', '  Standby scaled down: ' & $t_scale_down, '', 'Execution duration: ' & $string($round(($toMillis($states.context.State.EnteredTime) - $toMillis($started_at)) / 1000, 1)) & ' s', 'Alarm to recovery:  ' & ($alarm_time = '' ? 'n/a' : $string($round(($toMillis($t_last_check) - $toMillis($alarm_time)) / 1000, 1)) & ' s'), 'Healthy targets:    ' & $string($last_check.targets), '', 'Traffic is back on the primary AZ. The standby ASG is at desired 0 again.', '', 'Execution: ' & $states.context.Execution.Id], '\\n') %}"
+      },
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "Succeeded"
+    },
+    "Succeeded": {
+      "Type": "Succeed"
+    },
+    "NotifyFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Arguments": {
+        "TopicArn": "${sns_topic_arn}",
+        "Subject": "[mazf] Failback FAILED",
+        "Message": "{% $join(['Taskboard failback FAILED.', '', 'Failed in state: ' & $failed_state, 'Error: ' & $string($error.Error), 'Cause: ' & $string($error.Cause), '', 'Trigger:  ' & $trigger, 'Alarm:    ' & ($alarm_time = '' ? 'n/a' : $alarm_time), 'Planned:  ' & $cfg.source_asg & ' (' & $cfg.source_az & ') -> ' & $cfg.target_asg & ' (' & $cfg.target_az & ')', 'Primary scaled up at: ' & ($t_scale_up = '' ? 'not reached' : $t_scale_up), '', 'Check both ASGs, the target group health and the execution history. Traffic may be on neither AZ.', '', 'Execution: ' & $states.context.Execution.Id], '\\n') %}"
+      },
+      "Retry": [{"ErrorEquals": ["States.ALL"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2}],
+      "Next": "Failed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Error": "{% $string($error.Error) %}",
+      "Cause": "{% $string($error.Cause) %}"
+    }
+  }
+}

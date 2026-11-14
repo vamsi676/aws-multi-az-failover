@@ -163,3 +163,21 @@ before the NLB marked it healthy.
 ---
 
 ## Phase 6: failback
+
+| Command | Why | Result / meaning |
+|---|---|---|
+| generate `failback.asl.json` from the failover ASL (texts changed), `validate-state-machine-definition` | Same proven flow, reverse direction (source = ASG-b, target = ASG-a) | `OK` |
+| `terraform plan` / `apply` | Failback state machine + log group (reuses Lambdas and SFN role) | `2 to add, 0 to change, 0 to destroy` |
+| `scripts/start_failback.sh` | **Test #2** | `SUCCEEDED` in ~1m37s: Precheck -> scale ASG-a to 1 -> 3 checks (≈1.5 min: boot + user_data + CodeDeploy launch hook) -> scale ASG-b to 0 -> email |
+| `curl /api/meta`, `/api/tasks`; ASGs | Back on the primary AZ with the same data? | `us-east-1a`, new instance; ASG-a 1 / ASG-b 0; all tasks there, **including edits made on the board while it ran in 1b** |
+| monitor log (`curl` every 2 s) | Any downtime during failback? | **0 failed requests.** For ~50 s both instances were healthy and the NLB alternated 1a/1b; then 1b drained (30 s deregistration delay) |
+| rename failback states (`ScaleUpPrimary`, `PrimaryHealthy`, `ScaleDownStandby`), `terraform apply` | Clear execution history | `0 to add, 1 to change, 0 to destroy` (in-place) |
+
+**Phase 6 result: PASS** (back on us-east-1a, same tasks, email).
+
+**Lesson:** a *planned* move (failback) has zero downtime because the new target is healthy before the
+old one is removed. An *unplanned* failover's downtime is mostly detection time.
+
+---
+
+## Phase 7: Bedrock
